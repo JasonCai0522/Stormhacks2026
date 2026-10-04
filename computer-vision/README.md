@@ -1,5 +1,7 @@
 # MediaPipe Pose Starter
 
+For the combined SF6 controller, see the [project README](../README.md).
+
 This folder contains a small webcam-based pose detection example built with
 MediaPipe Pose Landmarker and OpenCV. The reusable `PoseDetector` class accepts
 BGR image frames and returns MediaPipe's 33 pose landmarks.

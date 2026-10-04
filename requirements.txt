@@ -1,0 +1,3 @@
+-r computer-vision/requirements.txt
+pyserial>=3.5,<4
+vgamepad>=0.1.0,<1
