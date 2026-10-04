@@ -10,6 +10,8 @@ import time
 from contextlib import ExitStack
 from pathlib import Path
 
+from game_state import GAME_STATE_PATH, read_game_state
+
 
 ROOT = Path(__file__).resolve().parent
 VISION_DIR = ROOT / "computer-vision"
@@ -103,9 +105,9 @@ def combine_voice_input(movement, attacks, voice_controls, previous_voice_contro
     return movement, attacks
 
 
-def update_controller(controller, held, last):
+def update_controller(controller, held, last, facing="right"):
     # Resolve every frame, including while a lean stays held during a side swap.
-    resolved = controller.resolve(held)
+    resolved = controller.resolve(held, facing=facing)
     if resolved != last:
         controller.apply(resolved)
     return resolved
@@ -183,8 +185,8 @@ def main():
     parser.add_argument("--attack-timeout", type=float, default=0.25,
                         help="Seconds without a repeated attack before releasing it (default: 0.25)")
     parser.add_argument("--controller", type=Path, default=ROOT / "game-controller" / "controller.py")
-    parser.add_argument("--game-state", type=Path,
-                        help="Override controller.py's facing-state JSON path")
+    parser.add_argument("--game-state", type=Path, default=GAME_STATE_PATH,
+                        help="Override the game-state JSON path configured in game_state.py")
     parser.add_argument("--cv-state-out", type=Path, default=_DEFAULT_CV_STATE,
                         help="Path to write cv_state.json for the REFramework overlay (default: SF6 reframework/data folder)")
     args = parser.parse_args()
@@ -203,8 +205,6 @@ def main():
     controller = load_controller(args.controller)
     camera = None
     try:
-        if args.game_state:
-            controller.GAME_STATE_PATH = str(args.game_state)
         controller.apply(set())
         with ExitStack() as resources:
             reader = None
@@ -242,7 +242,9 @@ def main():
                     )
                     previous_voice_controls = voice_controls
                     held = movement | attacks
-                    last = update_controller(controller, held, last)
+                    state = read_game_state(args.game_state)
+                    facing = state.facing if state is not None else "right"
+                    last = update_controller(controller, held, last, facing=facing)
                     write_cv_state(args.cv_state_out, movement, attacks, pose)
                     display = detector.draw_landmarks(frame, result)
                     label = " + ".join(sorted(held)) or "neutral"

@@ -6,3 +6,4 @@ numpy
 sounddevice
 soundfile
 elevenlabs
+httpx

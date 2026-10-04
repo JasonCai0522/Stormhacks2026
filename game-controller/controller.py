@@ -2,16 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Iterable, Set
-from typing import Any, Literal
+from typing import Literal
 
 import vgamepad as vg
-
-# ---- adjust these ----
-GAME_STATE_PATH: str = r"C:\Program Files (x86)\Steam\steamapps\common\Street Fighter 6\reframework\data\p1_character.json"
-# ----------------------
 
 B = vg.XUSB_BUTTON
 
@@ -39,30 +34,17 @@ BUTTONS: dict[str, vg.XUSB_BUTTON | Literal["RT", "LT"]] = {
 pad: vg.VX360Gamepad = vg.VX360Gamepad()
 
 
-def read_json(path: str) -> dict[str, Any] | None:
-    try:
-        with open(path, "r") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError, PermissionError):
-        return None
-
-
-def facing_right() -> bool:
-    """True if 'forward' means pressing right."""
-    state = read_json(GAME_STATE_PATH) or {}
-    if state.get("p1_side"):                 # earlier signal, if your Lua writes it
-        return state["p1_side"] == "left"    # P1 on the left of the opponent -> faces right
-    return state.get("p1_facing", "right") == "right"
-
-
-def resolve(held: str | Iterable[str]) -> set[str]:
+def resolve(held: str | Iterable[str], facing: Literal["left", "right"] = "right") -> set[str]:
     """Expand simultaneous inputs and resolve facing-relative directions.
 
     Accepts ["down", "medium"], ["down medium"], or "down+medium".
+    Facing is supplied by the caller; this module does not read game state.
     """
     if isinstance(held, str):
         held = [held]
-    right = facing_right()
+    if facing not in ("left", "right"):
+        raise ValueError("facing must be left or right")
+    right = facing == "right"
     out: set[str] = set()
     for combination in held:
         combination = str(combination).strip().lower()

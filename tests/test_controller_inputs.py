@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import MagicMock, Mock, call, patch
 
 import run_controller
+from game_state import GameState
 
 from run_controller import (
     AttackInput, MicrocontrollerAttacks, ROOT, load_module,
@@ -40,7 +41,8 @@ class ControllerInputTests(unittest.TestCase):
             voice.held.side_effect = [{"special"}, {"special"}, set()]
             cv2.waitKey.side_effect = [-1, -1, ord("q")]
             controller.resolve.side_effect = [set(), {"special"}, {"right"}]
-        argv = ["run_controller.py", "--no-bluetooth"]
+        state_path = ROOT / "test_game_state.json"
+        argv = ["run_controller.py", "--no-bluetooth", "--game-state", str(state_path)]
         if not voice_enabled:
             argv.append("--no-voice")
         with patch("sys.argv", argv), \
@@ -48,6 +50,7 @@ class ControllerInputTests(unittest.TestCase):
                 patch.dict("sys.modules", {"cv2": cv2, "pose_detector": pose_module, "serial": None}), \
                 patch.object(run_controller.Path, "is_file", return_value=True), \
                 patch.object(run_controller, "load_controller", return_value=controller), \
+                patch.object(run_controller, "read_game_state", return_value=GameState(p1_side="left")) as read_state, \
                 patch.object(run_controller, "start_voice_input", return_value=voice) as start_voice, \
                 patch.object(run_controller, "load_module") as load_transport:
             run_controller.main()
@@ -55,12 +58,15 @@ class ControllerInputTests(unittest.TestCase):
         if voice_enabled:
             start_voice.assert_called_once()
             self.assertEqual(controller.resolve.call_args_list,
-                             [call(set()), call({"special"}), call({"forward"})])
+                             [call(set(), facing="right"), call({"special"}, facing="right"),
+                              call({"forward"}, facing="right")])
+            self.assertEqual(read_state.call_args_list, [call(state_path)] * 3)
             self.assertEqual(controller.apply.call_args_list,
                              [call(set()), call({"special"}), call({"right"}), call(set())])
         else:
             start_voice.assert_not_called()
-            controller.resolve.assert_called_once_with({"forward"})
+            controller.resolve.assert_called_once_with({"forward"}, facing="right")
+            read_state.assert_called_once_with(state_path)
             self.assertEqual(controller.apply.call_args_list, [call(set()), call({"right"}), call(set())])
         cv2.VideoCapture.return_value.release.assert_called_once()
 
@@ -145,9 +151,11 @@ class ControllerInputTests(unittest.TestCase):
         held = {"forward", "light"}
         last = update_controller(controller, held, None)
         last = update_controller(controller, held, last)
-        last = update_controller(controller, held, last)
+        last = update_controller(controller, held, last, facing="left")
         self.assertEqual(last, {"left", "light"})
         self.assertEqual(controller.resolve.call_count, 3)
+        self.assertEqual(controller.resolve.call_args_list,
+                         [call(held, facing="right"), call(held, facing="right"), call(held, facing="left")])
         self.assertEqual(controller.apply.call_count, 2)
         controller.apply.assert_called_with({"left", "light"})
 

@@ -3,6 +3,7 @@
 ## Project layout
 
 - `run_controller.py`: main entry point combining all three inputs.
+- `game_state.py`: typed game-state snapshots, validation, and JSON loading.
 - `computer-vision/`: pose detection, webcam tools, and downloaded models.
 - `game-controller/`: virtual Xbox controller, game-state reader, and SF6 REFramework integration.
 - `microcontroller/`: ESP32 connection tools.
@@ -11,8 +12,9 @@
 ## Street Fighter 6 controller
 
 Run one program to combine webcam movement, ESP32 attacks, and the facing-state
-JSON used by `game-controller/controller.py`. The program imports that controller and
-uses its `resolve()` and `apply()` functions for facing and virtual Xbox output.
+JSON loaded by `game_state.py`. The program passes the snapshot's facing direction
+to `game-controller/controller.py` and uses its `resolve()` and `apply()` functions
+for facing and virtual Xbox output.
 The main program uses `BluetoothReceiver` in `microcontroller/bluetooth.py` for
 incoming attack strings. That module currently connects through a serial COM
 port; transport changes belong there as the Bluetooth implementation develops.
