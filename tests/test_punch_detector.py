@@ -38,30 +38,46 @@ class PunchDetectorTests(unittest.TestCase):
                          [None] * 4)
 
     def test_burst_fires_once_and_returns_peak(self):
-        self.assertEqual(self.replay([(0, 0.25), (10, 0.7), (20, 0.3)]),
-                         [None, None, 0.7])
+        self.assertEqual(self.replay([(0, 0.25), (10, 0.7), (20, 0.3),
+                                     (30, 0.3), (40, 0.3)]),
+                         [None] * 4 + [0.7])
         self.assertTrue(all(value is None for value in self.replay(
-            [(t, 0.8) for t in range(30, 320, 10)])))
+            [(t, 0.8) for t in range(50, 340, 10)])))
 
     def test_quiet_samples_rearm_for_next_punch(self):
-        self.replay([(0, 0.6), (10, 0.3), (20, 0.25)])
-        self.replay([(t, 0) for t in range(30, 360, 10)])
-        self.assertEqual(self.replay([(360, 0.6), (370, 0.3), (380, 0.25)]),
-                         [None, None, 0.6])
+        self.replay([(0, 0.6), (10, 0.3), (20, 0.25), (30, 0.3), (40, 0.3)])
+        self.replay([(t, 0) for t in range(50, 380, 10)])
+        self.assertEqual(self.replay([(380, 0.6), (390, 0.3), (400, 0.25),
+                                     (410, 0.3), (420, 0.3)]),
+                         [None] * 4 + [0.6])
 
     def test_packet_gap_preserves_retraction_cooldown(self):
-        self.replay([(0, 0.6), (10, 0.3), (20, 0.25)])
-        self.assertEqual(self.replay([(100, 0.8), (110, 0.3), (120, 0.3)]),
-                         [None] * 3)
+        self.replay([(0, 0.6), (10, 0.3), (20, 0.25), (30, 0.3), (40, 0.3)])
+        self.assertEqual(self.replay([(100, 0.8), (110, 0.3), (120, 0.3),
+                                     (130, 0.3), (140, 0.3)]),
+                         [None] * 5)
 
     def test_confirmation_uses_sensor_time(self):
-        self.assertEqual(self.replay([(0, 0.6), (1, 0.3), (2, 0.3)]),
-                         [None] * 3)
-        self.assertEqual(self.detector.update(20, (0.3, 0, 0)), 0.6)
+        self.assertEqual(self.replay([(0, 0.6), (1, 0.3), (2, 0.3),
+                                     (3, 0.3), (4, 0.3)]), [None] * 5)
+        self.assertEqual(self.detector.update(40, (0.3, 0, 0)), 0.6)
 
     def test_duplicate_packet_does_not_confirm(self):
-        self.assertEqual(self.replay([(0, 0.6), (0, 0.6), (20, 0.3)]),
-                         [None] * 3)
+        self.assertEqual(self.replay([(0, 0.6), (0, 0.6), (10, 0.3),
+                                     (20, 0.3), (40, 0.3)]), [None] * 5)
+
+    def test_short_tap_burst_does_not_fire(self):
+        self.assertEqual(self.replay([(0, 1.2), (10, 0.8), (20, 0.5),
+                                     (30, 0.1), (40, 0)]), [None] * 5)
+
+    def test_alternating_tap_vibration_does_not_fire(self):
+        self.assertTrue(all(value is None for value in self.replay(
+            [(t, 0.8 if t % 20 == 0 else -0.8) for t in range(0, 200, 10)])))
+
+    def test_negative_direction_punch_can_fire(self):
+        self.assertEqual(self.replay([(0, -0.6), (10, -0.3), (20, -0.25),
+                                     (30, -0.3), (40, -0.3)]),
+                         [None] * 4 + [0.6])
 
     def test_gap_or_clock_restart_discards_old_peak(self):
         for next_time in (100, 0):
@@ -70,7 +86,8 @@ class PunchDetectorTests(unittest.TestCase):
                 self.assertEqual(self.replay([
                     (10, 0.8), (20, 0.3), (next_time, 0.3),
                     (next_time + 10, 0.3), (next_time + 20, 0.3),
-                ]), [None] * 5)
+                    (next_time + 30, 0.3), (next_time + 40, 0.3),
+                ]), [None] * 7)
 
     def test_sensor_failure_clears_pending_burst(self):
         for det in punch.detectors.values():
@@ -78,7 +95,7 @@ class PunchDetectorTests(unittest.TestCase):
         with patch("builtins.print") as output:
             punch.handle_sample(0, (True, False), [(0.8, 0, 0), (0, 0, 0)])
             punch.handle_sample(10, (False, False), [(0, 0, 0), (0, 0, 0)])
-            for t in (20, 30, 40):
+            for t in (20, 30, 40, 50, 60):
                 punch.handle_sample(t, (True, False), [(0.3, 0, 0), (0, 0, 0)])
         output.assert_not_called()
 
