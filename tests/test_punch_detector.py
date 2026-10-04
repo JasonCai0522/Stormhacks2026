@@ -205,10 +205,10 @@ class PunchDetectorTests(unittest.TestCase):
             self.detector.update(t, (g, 0, 0))
         self.assertEqual(self.detector.last_kind, "STRAIGHT")
 
-    def test_labels_include_hand_type_and_strength(self):
+    def test_uppercut_labels_include_only_hand_and_type(self):
         for i, hand in ((0, "RIGHT"), (1, "LEFT")):
-            for peak, strength in ((0.6, "LIGHT"), (1.0, "HARD")):
-                with self.subTest(hand=hand, strength=strength):
+            for peak in (0.6, 1.0):
+                with self.subTest(hand=hand, peak=peak):
                     for det in punch.detectors.values():
                         det.reset()
                     with patch("builtins.print") as output:
@@ -220,13 +220,13 @@ class PunchDetectorTests(unittest.TestCase):
                                 deltas[i] = (peak if t == 70 else 0.2, 0, 0)
                             punch.handle_sample(t, (True, True), deltas, gyros)
                     output.assert_called_once()
-                    self.assertTrue(output.call_args.args[0].startswith(f"{hand}_UPPERCUT_{strength}"))
+                    self.assertEqual(output.call_args.args[0].split()[0], f"{hand}_UPPERCUT")
                     self.assertIn("gyro_peak=250.0", output.call_args.args[0])
 
-    def test_straight_labels_preserve_light_and_hard(self):
+    def test_straight_labels_include_only_hand_and_type(self):
         for i, hand in ((0, "RIGHT"), (1, "LEFT")):
-            for peak, strength in ((0.6, "LIGHT"), (0.9, "HARD")):
-                with self.subTest(hand=hand, strength=strength):
+            for peak in (0.6, 0.9):
+                with self.subTest(hand=hand, peak=peak):
                     for det in punch.detectors.values():
                         det.reset()
                     with patch("builtins.print") as output:
@@ -235,7 +235,7 @@ class PunchDetectorTests(unittest.TestCase):
                             deltas[i] = (g, 0, 0)
                             punch.handle_sample(t, (True, True), deltas)
                     output.assert_called_once()
-                    self.assertTrue(output.call_args.args[0].startswith(f"{hand}_STRAIGHT_{strength}"))
+                    self.assertEqual(output.call_args.args[0].split()[0], f"{hand}_STRAIGHT")
 
 
 if __name__ == "__main__":

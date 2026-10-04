@@ -79,15 +79,14 @@ python -m pip install bleak
 python microcontroller/punch_detector.py
 ```
 
-Output distinguishes `LEFT_STRAIGHT_LIGHT`, `LEFT_STRAIGHT_HARD`,
-`LEFT_UPPERCUT_LIGHT`, `LEFT_UPPERCUT_HARD`, and the corresponding `RIGHT` events.
+Output distinguishes `LEFT_STRAIGHT`, `LEFT_UPPERCUT`, `RIGHT_STRAIGHT`,
+and `RIGHT_UPPERCUT`.
 It prints peak acceleration change, peak gyro speed in degrees/second, and
 estimated net turn in degrees. This standalone debugger does not send these
 events to `run_controller.py`.
 
-Tune each hand separately in `punch_detector.py`'s `CONFIG`. `hard_g=0.90`
-classifies the confirmed acceleration-change peak; it does not measure impact
-force. Uppercuts require a confirmed acceleration burst, a gyro peak of at least
+Tune each hand separately in `punch_detector.py`'s `CONFIG`.
+Uppercuts require a confirmed acceleration burst, a gyro peak of at least
 `uppercut_gyro_dps=180`, and net rotation of at least `uppercut_turn_deg=12` over the
 preceding `uppercut_window_ms=120`. These are provisional thresholds, evaluated
 at punch confirmation. Later rotation does not upgrade an emitted straight

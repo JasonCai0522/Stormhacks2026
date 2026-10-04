@@ -97,7 +97,7 @@ class ImuPacketTests(unittest.TestCase):
                 imu.on_notify(None, imu.PACKET.pack(t, 0x81, delta, 0, 0, 8200, 0, 0))
                 imu.on_notify(None, imu.PACKET.pack(t, 0x85, 0, 0, 0, 0, 0, 0))
         output.assert_called_once()
-        self.assertTrue(output.call_args.args[0].startswith("RIGHT_UPPERCUT_LIGHT"))
+        self.assertEqual(output.call_args.args[0].split()[0], "RIGHT_UPPERCUT")
 
 
 if __name__ == "__main__":

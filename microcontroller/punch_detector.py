@@ -4,7 +4,7 @@ Punch classifier built on imu_client.py.
 IMU2 = left hand  -> JAB
 IMU1 = right hand -> CROSS
 
-Output includes hand, STRAIGHT/UPPERCUT and LIGHT/HARD. Uppercuts require a confirmed
+Output includes hand and STRAIGHT/UPPERCUT. Uppercuts require a confirmed
 acceleration burst plus sustained rotation about the configured upward-swing
 axis. This is an experimental heuristic; tune each hand with its sensor secured
 in a consistent orientation. The default assumes X runs across the hand, Y
@@ -45,8 +45,7 @@ METER_MIN_G = 0.05
 # Values are acceleration CHANGE per sample in g, not absolute acceleration.
 # Defaults target the supplied sketch's SAMPLE_MS=10 (about 100 Hz).
 # onset_g         : minimum peak dmag in a confirmed burst
-# hard_g          : confirmed acceleration-change peak for HARD (not impact force)
-# uppercut_gyro_dps   : minimum rotational speed for a uppercut
+# uppercut_gyro_dps   : minimum rotational speed for an uppercut
 # uppercut_turn_deg   : minimum net rotation in the recent uppercut_window_ms
 # uppercut_axis   : 0/1/2 = sensor X/Y/Z axis of the upward swing. Default X assumes
 #                   the mounting described above. All-axis detection is excluded
@@ -70,12 +69,12 @@ METER_MIN_G = 0.05
 CONFIG = {
     0: dict(label="CROSS", imu="IMU1", onset_g=0.45, rearm_g=0.06, rearm_samples=4,
             cycle_window_ms=300, sustain_g=0.15, confirm_samples=4, confirm_ms=30,
-            max_gap_ms=50, max_reversals=1, hand="RIGHT", hard_g=0.90,
+            max_gap_ms=50, max_reversals=1, hand="RIGHT",
             uppercut_gyro_dps=180, uppercut_turn_deg=12, uppercut_axis=0,
             uppercut_window_ms=120, uppercut_direction=0, uppercut_axis_share=0.70),
     1: dict(label="JAB",   imu="IMU2", onset_g=0.45, rearm_g=0.06, rearm_samples=4,
             cycle_window_ms=300, sustain_g=0.15, confirm_samples=4, confirm_ms=30,
-            max_gap_ms=50, max_reversals=1, hand="LEFT", hard_g=0.90,
+            max_gap_ms=50, max_reversals=1, hand="LEFT",
             uppercut_gyro_dps=180, uppercut_turn_deg=12, uppercut_axis=0,
             uppercut_window_ms=120, uppercut_direction=0, uppercut_axis_share=0.70),
 }
@@ -85,11 +84,9 @@ CONFIG = {
 class PunchDetector:
     def __init__(self, label, imu, onset_g, rearm_g, rearm_samples, cycle_window_ms,
                  sustain_g=0.15, confirm_samples=4, confirm_ms=30, max_gap_ms=50,
-                 max_reversals=1, hand=None, hard_g=0.90, uppercut_gyro_dps=180,
+                 max_reversals=1, hand=None, uppercut_gyro_dps=180,
                  uppercut_turn_deg=12, uppercut_axis=0, uppercut_window_ms=120,
                  uppercut_direction=0, uppercut_axis_share=0.70):
-        if not math.isfinite(hard_g) or hard_g <= onset_g:
-            raise ValueError("hard_g must be finite and greater than onset_g")
         if uppercut_axis not in (0, 1, 2):
             raise ValueError("uppercut_axis must be 0, 1 or 2")
         if uppercut_direction not in (-1, 0, 1):
@@ -101,7 +98,6 @@ class PunchDetector:
             raise ValueError("uppercut thresholds and window must be finite and positive")
         self.label, self.imu = label, imu
         self.hand = hand if hand is not None else imu
-        self.hard_g = hard_g
         self.uppercut_gyro_dps, self.uppercut_turn_deg = uppercut_gyro_dps, uppercut_turn_deg
         self.uppercut_axis, self.uppercut_window_ms = uppercut_axis, uppercut_window_ms
         self.uppercut_direction = uppercut_direction
@@ -124,9 +120,6 @@ class PunchDetector:
         self.last_gyro_peak = self.last_turn_deg = 0.0
         self.last_axis_share = 0.0
         self.clear_burst()
-
-    def strength_for_peak(self, peak_g):
-        return "HARD" if peak_g >= self.hard_g else "LIGHT"
 
     def rotation_metrics(self):
         """Peak angular speed and net short-window turn; opposing motion cancels."""
@@ -246,7 +239,7 @@ def handle_sample(t_ms, imu_ok, deltas, gyros=None):
         mag = det.update(t_ms, d, gyro)
         if mag is not None:
             x, y, z = d
-            event = f"{det.hand}_{det.last_kind}_{det.strength_for_peak(mag)}"
+            event = f"{det.hand}_{det.last_kind}"
             punch_label = "UPPERCUT" if det.last_kind == "UPPERCUT" else det.label
             print(f"{event} {punch_label} ({det.imu})  peak dmag={mag:.2f} g  "
                   f"gyro_axis={det.uppercut_axis} gyro_peak={det.last_gyro_peak:.1f} deg/s "
