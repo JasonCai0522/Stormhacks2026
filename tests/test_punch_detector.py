@@ -80,8 +80,16 @@ class PunchDetectorTests(unittest.TestCase):
                          [None] * 3 + [0.6, None])
 
     def test_light_short_punch_can_fire(self):
-        self.assertEqual(self.replay([(0, 0.45), (10, 0.15), (20, 0.13),
-                                     (30, 0.14)]), [None] * 3 + [0.45])
+        self.assertEqual(self.replay([(0, 0.48), (10, 0.16), (20, 0.15),
+                                     (30, 0.16)]), [None] * 3 + [0.48])
+
+    def test_moderate_bump_below_peak_threshold_does_not_fire(self):
+        self.assertEqual(self.replay([(0, 0.43), (10, 0.2), (20, 0.18),
+                                     (30, 0.16)]), [None] * 4)
+
+    def test_strong_bump_with_weak_tail_does_not_fire(self):
+        self.assertEqual(self.replay([(0, 0.6), (10, 0.18), (20, 0.13),
+                                     (30, 0.14), (40, 0)]), [None] * 5)
 
     def test_punch_acceleration_then_deceleration_can_fire(self):
         self.assertEqual(self.replay([(0, 0.45), (10, 0.15), (20, -0.3),

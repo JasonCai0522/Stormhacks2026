@@ -51,11 +51,11 @@ METER_MIN_G = 0.05
 #                   (its retraction). Too short -> retraction double-fires.
 #                   Too long -> a quick second punch from the same hand is missed.
 CONFIG = {
-    0: dict(label="CROSS", imu="IMU1", onset_g=0.40, rearm_g=0.06, rearm_samples=4,
-            cycle_window_ms=300, sustain_g=0.12, confirm_samples=4, confirm_ms=30,
+    0: dict(label="CROSS", imu="IMU1", onset_g=0.45, rearm_g=0.06, rearm_samples=4,
+            cycle_window_ms=300, sustain_g=0.15, confirm_samples=4, confirm_ms=30,
             max_gap_ms=50, max_reversals=1),
-    1: dict(label="JAB",   imu="IMU2", onset_g=0.40, rearm_g=0.06, rearm_samples=4,
-            cycle_window_ms=300, sustain_g=0.12, confirm_samples=4, confirm_ms=30,
+    1: dict(label="JAB",   imu="IMU2", onset_g=0.45, rearm_g=0.06, rearm_samples=4,
+            cycle_window_ms=300, sustain_g=0.15, confirm_samples=4, confirm_ms=30,
             max_gap_ms=50, max_reversals=1),
 }
 # -----------------------------------------------------------------------------
@@ -63,7 +63,7 @@ CONFIG = {
 
 class PunchDetector:
     def __init__(self, label, imu, onset_g, rearm_g, rearm_samples, cycle_window_ms,
-                 sustain_g=0.12, confirm_samples=4, confirm_ms=30, max_gap_ms=50,
+                 sustain_g=0.15, confirm_samples=4, confirm_ms=30, max_gap_ms=50,
                  max_reversals=1):
         self.label, self.imu = label, imu
         self.onset_g, self.rearm_g = onset_g, rearm_g
