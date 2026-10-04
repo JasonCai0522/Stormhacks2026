@@ -28,18 +28,20 @@ local function get_character(player_index)
     return id, names[id] or ("Unknown (" .. tostring(id) .. ")")
 end
 
-local function get_facing(player_index)
-    local ok, facing, side = pcall(function()
+-- Returns facing, side, and P1 health values (health is nil if unavailable).
+local function get_state(player_index)
+    local ok, facing, side, vnew, vold = pcall(function()
         local gBattle = sdk.find_type_definition("gBattle")
         local sPlayer = gBattle:get_field("Player"):get_data(nil)
         local p = sPlayer.mcPlayer[player_index - 1]
-        if not p then return "", "" end
+        if not p then return "", "", nil, nil end
         local rl = p:get_field("rl_dir")
         local cs = p:get_field("cmd_side")
-        return (rl and "right" or "left"), (cs and "left" or "right")
+        return (rl and "right" or "left"), (cs and "left" or "right"),
+               p:get_field("vital_new"), p:get_field("vital_old")
     end)
-    if not ok then return "", "" end
-    return facing, side
+    if not ok then return "", "", nil, nil end
+    return facing, side, vnew, vold
 end
 
 -- ── Colour helper ─────────────────────────────────────────────────────────────
@@ -222,24 +224,27 @@ end
 -- ── REFramework frame callback ────────────────────────────────────────────────
 
 re.on_frame(function()
-    -- 1. Write facing/character JSON when state changes (existing behaviour).
+    -- 1. Write facing/character/health JSON when state changes.
     local _, name = get_character(1)
     name = name or ""
 
-    local facing, side = "", ""
+    local facing, side, health, health_old = "", "", nil, nil
     if name ~= "" then
-        facing, side = get_facing(1)
+        facing, side, health, health_old = get_state(1)
     end
     last_facing = facing
     last_side   = side
 
-    local snapshot = name .. "|" .. facing .. "|" .. side
+    local h_str = tostring(health) .. "|" .. tostring(health_old)
+    local snapshot = name .. "|" .. facing .. "|" .. side .. "|" .. h_str
     if snapshot ~= last_snapshot then
         last_snapshot = snapshot
         json.dump_file("p1_character.json", {
-            p1_name   = name,
-            p1_facing = facing,
-            p1_side   = side,
+            p1_name       = name,
+            p1_facing     = facing,
+            p1_side       = side,
+            p1_health     = health,      -- current HP (nil before match starts)
+            p1_health_old = health_old,  -- HP from previous frame
         })
     end
 
@@ -255,10 +260,11 @@ end)
 
 re.on_draw_ui(function()
     local _, n1 = get_character(1)
-    local facing, side = get_facing(1)
-    imgui.text("P1: "      .. (n1 or "N/A"))
-    imgui.text("Facing: "  .. facing .. "  Side: " .. side)
+    local facing, side, health, health_old = get_state(1)
+    imgui.text("P1: "        .. (n1 or "N/A"))
+    imgui.text("Facing: "    .. facing .. "  Side: " .. side)
+    imgui.text("P1 health: " .. tostring(health) .. "  (old " .. tostring(health_old) .. ")")
     imgui.separator()
-    imgui.text("Movement: " .. cv_movement)
-    imgui.text("Attack:   " .. cv_attack)
+    imgui.text("Movement: "  .. cv_movement)
+    imgui.text("Attack:   "  .. cv_attack)
 end)
