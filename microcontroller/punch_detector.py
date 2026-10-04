@@ -4,9 +4,11 @@ Punch classifier built on imu_client.py.
 IMU2 = left hand  -> JAB
 IMU1 = right hand -> CROSS
 
-Output includes hand, STRAIGHT/HOOK and LIGHT/HARD. Hooks require a confirmed
-acceleration burst plus sustained gyroscope rotation. This is an experimental
-heuristic; tune each hand with its sensor secured in a consistent orientation.
+Output includes hand, STRAIGHT/UPPERCUT and LIGHT/HARD. Uppercuts require a confirmed
+acceleration burst plus sustained rotation about the configured upward-swing
+axis. This is an experimental heuristic; tune each hand with its sensor secured
+in a consistent orientation. The default assumes X runs across the hand, Y
+points toward the knuckles, and Z points out of the back of the hand.
 Legacy acceleration-only firmware supports straight punches only.
 
 How a punch is counted
@@ -44,11 +46,14 @@ METER_MIN_G = 0.05
 # Defaults target the supplied sketch's SAMPLE_MS=10 (about 100 Hz).
 # onset_g         : minimum peak dmag in a confirmed burst
 # hard_g          : confirmed acceleration-change peak for HARD (not impact force)
-# hook_gyro_dps   : minimum rotational speed for a hook
-# hook_turn_deg   : minimum net rotation in the recent hook_window_ms
-# hook_axis       : None = use all axes; 0/1/2 = use sensor X/Y/Z. Selecting the
-#                   hook's sweep axis can help exclude wrist rolls.
-# hook_window_ms  : gyro history leading up to punch confirmation
+# uppercut_gyro_dps   : minimum rotational speed for a uppercut
+# uppercut_turn_deg   : minimum net rotation in the recent uppercut_window_ms
+# uppercut_axis   : 0/1/2 = sensor X/Y/Z axis of the upward swing. Default X assumes
+#                   the mounting described above. All-axis detection is excluded
+#                   because it confuses fist rolls and horizontal sweeps.
+# uppercut_direction : 0 = either sign; +1/-1 = only the calibrated upward sign.
+# uppercut_axis_share : minimum fraction of net rotation along the selected axis
+# uppercut_window_ms  : gyro history leading up to punch confirmation
 # sustain_g       : minimum dmag for each consecutive sample in the burst
 # confirm_samples : minimum number of consecutive active samples
 # confirm_ms      : minimum duration of the burst (uses the ESP32 timestamps)
@@ -66,11 +71,13 @@ CONFIG = {
     0: dict(label="CROSS", imu="IMU1", onset_g=0.45, rearm_g=0.06, rearm_samples=4,
             cycle_window_ms=300, sustain_g=0.15, confirm_samples=4, confirm_ms=30,
             max_gap_ms=50, max_reversals=1, hand="RIGHT", hard_g=0.90,
-            hook_gyro_dps=180, hook_turn_deg=12, hook_axis=None, hook_window_ms=120),
+            uppercut_gyro_dps=180, uppercut_turn_deg=12, uppercut_axis=0,
+            uppercut_window_ms=120, uppercut_direction=0, uppercut_axis_share=0.70),
     1: dict(label="JAB",   imu="IMU2", onset_g=0.45, rearm_g=0.06, rearm_samples=4,
             cycle_window_ms=300, sustain_g=0.15, confirm_samples=4, confirm_ms=30,
             max_gap_ms=50, max_reversals=1, hand="LEFT", hard_g=0.90,
-            hook_gyro_dps=180, hook_turn_deg=12, hook_axis=None, hook_window_ms=120),
+            uppercut_gyro_dps=180, uppercut_turn_deg=12, uppercut_axis=0,
+            uppercut_window_ms=120, uppercut_direction=0, uppercut_axis_share=0.70),
 }
 # -----------------------------------------------------------------------------
 
@@ -78,20 +85,27 @@ CONFIG = {
 class PunchDetector:
     def __init__(self, label, imu, onset_g, rearm_g, rearm_samples, cycle_window_ms,
                  sustain_g=0.15, confirm_samples=4, confirm_ms=30, max_gap_ms=50,
-                 max_reversals=1, hand=None, hard_g=0.90, hook_gyro_dps=180,
-                 hook_turn_deg=12, hook_axis=None, hook_window_ms=120):
+                 max_reversals=1, hand=None, hard_g=0.90, uppercut_gyro_dps=180,
+                 uppercut_turn_deg=12, uppercut_axis=0, uppercut_window_ms=120,
+                 uppercut_direction=0, uppercut_axis_share=0.70):
         if not math.isfinite(hard_g) or hard_g <= onset_g:
             raise ValueError("hard_g must be finite and greater than onset_g")
-        if hook_axis not in (None, 0, 1, 2):
-            raise ValueError("hook_axis must be None, 0, 1 or 2")
+        if uppercut_axis not in (0, 1, 2):
+            raise ValueError("uppercut_axis must be 0, 1 or 2")
+        if uppercut_direction not in (-1, 0, 1):
+            raise ValueError("uppercut_direction must be -1, 0 or 1")
+        if not 0 < uppercut_axis_share <= 1:
+            raise ValueError("uppercut_axis_share must be between 0 (exclusive) and 1")
         if any(not math.isfinite(v) or v <= 0
-               for v in (hook_gyro_dps, hook_turn_deg, hook_window_ms)):
-            raise ValueError("hook thresholds and window must be finite and positive")
+               for v in (uppercut_gyro_dps, uppercut_turn_deg, uppercut_window_ms)):
+            raise ValueError("uppercut thresholds and window must be finite and positive")
         self.label, self.imu = label, imu
         self.hand = hand if hand is not None else imu
         self.hard_g = hard_g
-        self.hook_gyro_dps, self.hook_turn_deg = hook_gyro_dps, hook_turn_deg
-        self.hook_axis, self.hook_window_ms = hook_axis, hook_window_ms
+        self.uppercut_gyro_dps, self.uppercut_turn_deg = uppercut_gyro_dps, uppercut_turn_deg
+        self.uppercut_axis, self.uppercut_window_ms = uppercut_axis, uppercut_window_ms
+        self.uppercut_direction = uppercut_direction
+        self.uppercut_axis_share = uppercut_axis_share
         self.onset_g, self.rearm_g = onset_g, rearm_g
         self.rearm_samples, self.cycle_window_ms = rearm_samples, cycle_window_ms
         self.sustain_g = sustain_g
@@ -108,6 +122,7 @@ class PunchDetector:
         self.gyro_history = deque()
         self.last_kind = "STRAIGHT"
         self.last_gyro_peak = self.last_turn_deg = 0.0
+        self.last_axis_share = 0.0
         self.clear_burst()
 
     def strength_for_peak(self, peak_g):
@@ -119,8 +134,9 @@ class PunchDetector:
         peak = 0.0
         previous = None
         for timestamp, gyro in self.gyro_history:
-            speed = (math.sqrt(sum(v * v for v in gyro)) if self.hook_axis is None
-                     else abs(gyro[self.hook_axis]))
+            rate = gyro[self.uppercut_axis]
+            speed = (abs(rate) if self.uppercut_direction == 0
+                     else max(0, self.uppercut_direction * rate))
             peak = max(peak, speed)
             if previous is not None:
                 prev_t, prev_gyro = previous
@@ -128,8 +144,11 @@ class PunchDetector:
                 for axis in range(3):
                     turn[axis] += (prev_gyro[axis] + gyro[axis]) * 0.5 * dt
             previous = timestamp, gyro
-        angle = (math.sqrt(sum(v * v for v in turn)) if self.hook_axis is None
-                 else abs(turn[self.hook_axis]))
+        selected_turn = turn[self.uppercut_axis]
+        total_turn = math.sqrt(sum(v * v for v in turn))
+        self.last_axis_share = abs(selected_turn) / total_turn if total_turn else 0.0
+        angle = (abs(selected_turn) if self.uppercut_direction == 0
+                 else self.uppercut_direction * selected_turn)
         return peak, angle
 
     def clear_burst(self):
@@ -157,7 +176,7 @@ class PunchDetector:
             self.gyro_history.clear()
         else:
             self.gyro_history.append((t_ms, tuple(gyro)))
-            while self.gyro_history[0][0] < t_ms - self.hook_window_ms:
+            while self.gyro_history[0][0] < t_ms - self.uppercut_window_ms:
                 self.gyro_history.popleft()
         mag = math.sqrt(d[0] ** 2 + d[1] ** 2 + d[2] ** 2)
 
@@ -186,8 +205,9 @@ class PunchDetector:
                     and self.burst_reversals <= self.max_reversals):
                 peak = self.burst_peak
                 self.last_gyro_peak, self.last_turn_deg = self.rotation_metrics()
-                self.last_kind = ("HOOK" if self.last_gyro_peak >= self.hook_gyro_dps
-                                  and self.last_turn_deg >= self.hook_turn_deg
+                self.last_kind = ("UPPERCUT" if self.last_gyro_peak >= self.uppercut_gyro_dps
+                                  and self.last_turn_deg >= self.uppercut_turn_deg
+                                  and self.last_axis_share >= self.uppercut_axis_share
                                   else "STRAIGHT")
                 self.armed = False
                 self.window_end_ms = t_ms + self.cycle_window_ms
@@ -220,16 +240,17 @@ def handle_sample(t_ms, imu_ok, deltas, gyros=None):
         if METER:
             m = math.sqrt(d[0] ** 2 + d[1] ** 2 + d[2] ** 2)
             speed = 0.0 if gyro is None else math.sqrt(sum(v * v for v in gyro))
-            if m >= METER_MIN_G or speed >= det.hook_gyro_dps:
+            if m >= METER_MIN_G or speed >= det.uppercut_gyro_dps:
                 gyro_text = "unavailable" if gyro is None else str(tuple(round(v, 1) for v in gyro))
                 print(f"t={t_ms} {det.hand} dmag={m:.3f} g gyro={gyro_text} deg/s")
         mag = det.update(t_ms, d, gyro)
         if mag is not None:
             x, y, z = d
             event = f"{det.hand}_{det.last_kind}_{det.strength_for_peak(mag)}"
-            punch_label = "HOOK" if det.last_kind == "HOOK" else det.label
+            punch_label = "UPPERCUT" if det.last_kind == "UPPERCUT" else det.label
             print(f"{event} {punch_label} ({det.imu})  peak dmag={mag:.2f} g  "
-                  f"gyro_peak={det.last_gyro_peak:.1f} deg/s turn={det.last_turn_deg:.1f} deg  "
+                  f"gyro_axis={det.uppercut_axis} gyro_peak={det.last_gyro_peak:.1f} deg/s "
+                  f"turn={det.last_turn_deg:.1f} deg axis_share={det.last_axis_share:.2f}  "
                   f"current d=({x:+.2f}, {y:+.2f}, {z:+.2f})")
 
 

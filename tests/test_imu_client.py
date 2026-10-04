@@ -81,7 +81,7 @@ class ImuPacketTests(unittest.TestCase):
             imu.on_notify(None, packet)
         self.handler.assert_not_called()
 
-    def test_firmware_packets_drive_hook_debug_output(self):
+    def test_firmware_packets_drive_uppercut_debug_output(self):
         detector_spec = importlib.util.spec_from_file_location(
             "packet_punch_detector",
             Path(__file__).resolve().parents[1] / "microcontroller" / "punch_detector.py",
@@ -94,10 +94,10 @@ class ImuPacketTests(unittest.TestCase):
         with patch("builtins.print") as output:
             for t in range(0, 110, 10):
                 delta = 0 if t < 70 else (600 if t == 70 else 200)
-                imu.on_notify(None, imu.PACKET.pack(t, 0x81, delta, 0, 0, 0, 0, 8200))
+                imu.on_notify(None, imu.PACKET.pack(t, 0x81, delta, 0, 0, 8200, 0, 0))
                 imu.on_notify(None, imu.PACKET.pack(t, 0x85, 0, 0, 0, 0, 0, 0))
         output.assert_called_once()
-        self.assertTrue(output.call_args.args[0].startswith("RIGHT_HOOK_LIGHT"))
+        self.assertTrue(output.call_args.args[0].startswith("RIGHT_UPPERCUT_LIGHT"))
 
 
 if __name__ == "__main__":

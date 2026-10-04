@@ -123,42 +123,75 @@ class PunchDetectorTests(unittest.TestCase):
                   for t, g in ((70, peak), (80, 0.2), (90, 0.2), (100, 0.2))]
         self.assertEqual(values, [None] * 3 + [peak])
 
-    def test_sweeping_punch_is_hook_in_either_direction(self):
+    def test_upward_axis_punch_is_uppercut_with_uncalibrated_sign(self):
         for rate in (250, -250):
             with self.subTest(rate=rate):
                 self.detector.reset()
-                self.gyro_punch((0, 0, rate))
-                self.assertEqual(self.detector.last_kind, "HOOK")
+                self.gyro_punch((rate, 0, 0))
+                self.assertEqual(self.detector.last_kind, "UPPERCUT")
                 self.assertAlmostEqual(self.detector.last_turn_deg, 25)
 
     def test_low_rotation_punch_stays_straight(self):
-        self.gyro_punch((0, 0, 40))
+        self.gyro_punch((40, 0, 0))
         self.assertEqual(self.detector.last_kind, "STRAIGHT")
 
-    def test_single_gyro_spike_does_not_make_a_hook(self):
+    def test_single_gyro_spike_does_not_make_an_uppercut(self):
         for t, g in ((0, 0.6), (10, 0.2), (20, 0.2), (30, 0.2)):
-            self.detector.update(t, (g, 0, 0), (0, 0, 500 if t == 0 else 0))
+            self.detector.update(t, (g, 0, 0), (500 if t == 0 else 0, 0, 0))
         self.assertEqual(self.detector.last_kind, "STRAIGHT")
 
     def test_rotation_without_acceleration_burst_does_not_fire(self):
         for t in range(0, 200, 10):
-            self.assertIsNone(self.detector.update(t, (0.1, 0, 0), (0, 0, 300)))
+            self.assertIsNone(self.detector.update(t, (0.1, 0, 0), (300, 0, 0)))
 
-    def test_alternating_rotation_cancels_hook_evidence(self):
+    def test_alternating_rotation_cancels_uppercut_evidence(self):
         for t in range(0, 110, 10):
             rate = 300 if t % 20 == 0 else -300
             g = 0 if t < 70 else (0.6 if t == 70 else 0.2)
-            self.detector.update(t, (g, 0, 0), (0, 0, rate))
+            self.detector.update(t, (g, 0, 0), (rate, 0, 0))
         self.assertEqual(self.detector.last_kind, "STRAIGHT")
 
-    def test_hook_axis_excludes_rotation_on_other_axes(self):
-        self.detector = punch.PunchDetector(**dict(punch.CONFIG[0], hook_axis=2))
+    def test_uppercut_axis_excludes_rotation_on_other_axes(self):
+        self.detector = punch.PunchDetector(**dict(punch.CONFIG[0], uppercut_axis=2))
         self.gyro_punch((300, 0, 0))
         self.assertEqual(self.detector.last_kind, "STRAIGHT")
 
+    def test_horizontal_sweep_and_fist_roll_are_not_uppercuts(self):
+        for gyro in ((0, 0, 300), (0, 300, 0)):
+            with self.subTest(gyro=gyro):
+                self.detector.reset()
+                self.gyro_punch(gyro)
+                self.assertEqual(self.detector.last_kind, "STRAIGHT")
+
+    def test_mixed_rotation_needs_dominant_upward_axis(self):
+        self.gyro_punch((250, 400, 0))
+        self.assertGreater(self.detector.last_turn_deg, self.detector.uppercut_turn_deg)
+        self.assertEqual(self.detector.last_kind, "STRAIGHT")
+
+    def test_uppercut_direction_can_exclude_downward_swing(self):
+        for direction in (-1, 1):
+            for rate in (-250, 250):
+                with self.subTest(direction=direction, rate=rate):
+                    self.detector = punch.PunchDetector(
+                        **dict(punch.CONFIG[0], uppercut_direction=direction))
+                    self.gyro_punch((rate, 0, 0))
+                    expected = "UPPERCUT" if rate * direction > 0 else "STRAIGHT"
+                    self.assertEqual(self.detector.last_kind, expected)
+
+    def test_uppercut_axis_can_be_remapped_for_mounting(self):
+        self.detector = punch.PunchDetector(**dict(punch.CONFIG[0], uppercut_axis=2))
+        self.gyro_punch((0, 0, 250))
+        self.assertEqual(self.detector.last_kind, "UPPERCUT")
+
+    def test_uppercut_config_rejects_ambiguous_or_invalid_settings(self):
+        for settings in ({"uppercut_axis": None}, {"uppercut_direction": 2},
+                         {"uppercut_axis_share": 0}, {"uppercut_axis_share": 1.1}):
+            with self.subTest(settings=settings), self.assertRaises(ValueError):
+                punch.PunchDetector(**dict(punch.CONFIG[0], **settings))
+
     def test_old_rotation_expires(self):
         for t in range(0, 200, 10):
-            self.detector.update(t, (0, 0, 0), (0, 0, 300))
+            self.detector.update(t, (0, 0, 0), (300, 0, 0))
         for t in range(200, 400, 10):
             self.detector.update(t, (0, 0, 0), (0, 0, 0))
         for t, g in ((400, 0.6), (410, 0.2), (420, 0.2), (430, 0.2)):
@@ -167,7 +200,7 @@ class PunchDetectorTests(unittest.TestCase):
 
     def test_legacy_packet_cannot_reuse_gyro_evidence(self):
         for t in range(0, 100, 10):
-            self.detector.update(t, (0, 0, 0), (0, 0, 300))
+            self.detector.update(t, (0, 0, 0), (300, 0, 0))
         for t, g in ((100, 0.6), (110, 0.2), (120, 0.2), (130, 0.2)):
             self.detector.update(t, (g, 0, 0))
         self.assertEqual(self.detector.last_kind, "STRAIGHT")
@@ -182,12 +215,12 @@ class PunchDetectorTests(unittest.TestCase):
                         for t in range(0, 110, 10):
                             deltas = [(0, 0, 0), (0, 0, 0)]
                             gyros = [(0, 0, 0), (0, 0, 0)]
-                            gyros[i] = (0, 0, 250)
+                            gyros[i] = (250, 0, 0)
                             if t >= 70:
                                 deltas[i] = (peak if t == 70 else 0.2, 0, 0)
                             punch.handle_sample(t, (True, True), deltas, gyros)
                     output.assert_called_once()
-                    self.assertTrue(output.call_args.args[0].startswith(f"{hand}_HOOK_{strength}"))
+                    self.assertTrue(output.call_args.args[0].startswith(f"{hand}_UPPERCUT_{strength}"))
                     self.assertIn("gyro_peak=250.0", output.call_args.args[0])
 
     def test_straight_labels_preserve_light_and_hard(self):
