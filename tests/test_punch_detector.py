@@ -115,6 +115,40 @@ class PunchDetectorTests(unittest.TestCase):
                 punch.handle_sample(t, (True, False), [(0.3, 0, 0), (0, 0, 0)])
         output.assert_not_called()
 
+    def test_each_hand_reports_light_and_hard_punches(self):
+        for hand_index, hand in ((0, "RIGHT"), (1, "LEFT")):
+            for peak, strength in ((0.6, "LIGHT"), (0.9, "HARD"), (1.2, "HARD")):
+                with self.subTest(hand=hand, peak=peak):
+                    for det in punch.detectors.values():
+                        det.reset()
+                    with patch("builtins.print") as output:
+                        for t, g in ((0, peak), (10, 0.2), (20, 0.2), (30, 0.2)):
+                            deltas = [(0, 0, 0), (0, 0, 0)]
+                            deltas[hand_index] = (g, 0, 0)
+                            punch.handle_sample(t, (True, True), deltas)
+                    output.assert_called_once()
+                    self.assertTrue(output.call_args.args[0].startswith(f"{hand}_{strength}"))
+
+    def test_hard_threshold_can_be_tuned_independently(self):
+        right = punch.PunchDetector(**dict(punch.CONFIG[0], hard_g=1.1))
+        left = punch.PunchDetector(**dict(punch.CONFIG[1], hard_g=0.8))
+        self.assertEqual(right.strength_for_peak(0.9), "LIGHT")
+        self.assertEqual(left.strength_for_peak(0.9), "HARD")
+
+    def test_hard_threshold_must_leave_room_for_light_punches(self):
+        for threshold in (0.4, 0.45, float("nan"), float("inf")):
+            with self.subTest(threshold=threshold), self.assertRaises(ValueError):
+                punch.PunchDetector(**dict(punch.CONFIG[0], hard_g=threshold))
+
+    def test_isolated_hard_spike_is_not_reported_as_a_punch(self):
+        for det in punch.detectors.values():
+            det.reset()
+        with patch("builtins.print") as output:
+            punch.handle_sample(0, (True, True), [(1.5, 0, 0), (1.5, 0, 0)])
+            for t in (10, 20, 30):
+                punch.handle_sample(t, (True, True), [(0, 0, 0), (0, 0, 0)])
+        output.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

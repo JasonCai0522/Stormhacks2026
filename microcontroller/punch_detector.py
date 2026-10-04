@@ -4,6 +4,10 @@ Punch classifier built on imu_client.py.
 IMU2 = left hand  -> JAB
 IMU1 = right hand -> CROSS
 
+Confirmed punches print LEFT_LIGHT / LEFT_HARD or RIGHT_LIGHT / RIGHT_HARD.
+Strength uses the peak acceleration change observed up to confirmation, not
+impact force or a later retraction spike. Tune hard_g separately for each hand.
+
 How a punch is counted
 ----------------------
 A punch has two phases: the extension (out) and the retraction (back). Either one
@@ -37,6 +41,8 @@ METER_MIN_G = 0.05
 # Values are acceleration CHANGE per sample in g, not absolute acceleration.
 # Defaults target the supplied sketch's SAMPLE_MS=10 (about 100 Hz).
 # onset_g         : minimum peak dmag in a confirmed burst
+# hard_g          : confirmed peak at or above this is HARD; otherwise LIGHT.
+#                   This is a starting value to tune, not a force measurement.
 # sustain_g       : minimum dmag for each consecutive sample in the burst
 # confirm_samples : minimum number of consecutive active samples
 # confirm_ms      : minimum duration of the burst (uses the ESP32 timestamps)
@@ -53,10 +59,10 @@ METER_MIN_G = 0.05
 CONFIG = {
     0: dict(label="CROSS", imu="IMU1", onset_g=0.45, rearm_g=0.06, rearm_samples=4,
             cycle_window_ms=300, sustain_g=0.15, confirm_samples=4, confirm_ms=30,
-            max_gap_ms=50, max_reversals=1),
+            max_gap_ms=50, max_reversals=1, hand="RIGHT", hard_g=0.90),
     1: dict(label="JAB",   imu="IMU2", onset_g=0.45, rearm_g=0.06, rearm_samples=4,
             cycle_window_ms=300, sustain_g=0.15, confirm_samples=4, confirm_ms=30,
-            max_gap_ms=50, max_reversals=1),
+            max_gap_ms=50, max_reversals=1, hand="LEFT", hard_g=0.90),
 }
 # -----------------------------------------------------------------------------
 
@@ -64,8 +70,12 @@ CONFIG = {
 class PunchDetector:
     def __init__(self, label, imu, onset_g, rearm_g, rearm_samples, cycle_window_ms,
                  sustain_g=0.15, confirm_samples=4, confirm_ms=30, max_gap_ms=50,
-                 max_reversals=1):
+                 max_reversals=1, hand=None, hard_g=0.90):
+        if not math.isfinite(hard_g) or hard_g <= onset_g:
+            raise ValueError("hard_g must be finite and greater than onset_g")
         self.label, self.imu = label, imu
+        self.hand = hand if hand is not None else imu
+        self.hard_g = hard_g
         self.onset_g, self.rearm_g = onset_g, rearm_g
         self.rearm_samples, self.cycle_window_ms = rearm_samples, cycle_window_ms
         self.sustain_g = sustain_g
@@ -73,6 +83,10 @@ class PunchDetector:
         self.max_gap_ms = max_gap_ms
         self.max_reversals = max_reversals
         self.reset()
+
+    def strength_for_peak(self, peak_g):
+        """Classify an already confirmed punch; this does not validate motion."""
+        return "HARD" if peak_g >= self.hard_g else "LIGHT"
 
     def reset(self):
         self.armed = True
@@ -161,7 +175,9 @@ def handle_sample(t_ms, imu_ok, deltas):
         mag = det.update(t_ms, d)
         if mag is not None:
             x, y, z = d
-            print(f"{det.label:<5} ({det.imu})  peak dmag={mag:.2f} g  current d=({x:+.2f}, {y:+.2f}, {z:+.2f})")
+            strength = det.strength_for_peak(mag)
+            event = f"{det.hand}_{strength}"
+            print(f"{event:<11} {det.label:<5} ({det.imu})  peak dmag={mag:.2f} g  current d=({x:+.2f}, {y:+.2f}, {z:+.2f})")
 
 
 # imu_client.on_notify looks up handle_sample at call time, so swapping it out here
