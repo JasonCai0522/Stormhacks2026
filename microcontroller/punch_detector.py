@@ -67,13 +67,13 @@ METER_MIN_G = 0.05
 #                   (its retraction). Too short -> retraction double-fires.
 #                   Too long -> a quick second punch from the same hand is missed.
 CONFIG = {
-    0: dict(label="CROSS", imu="IMU1", onset_g=0.45, rearm_g=0.06, rearm_samples=4,
-            cycle_window_ms=300, sustain_g=0.15, confirm_samples=4, confirm_ms=30,
+    0: dict(label="CROSS", imu="IMU1", onset_g=0.45, rearm_g=0.06, rearm_samples=3,
+            cycle_window_ms=200, sustain_g=0.15, confirm_samples=4, confirm_ms=30,
             max_gap_ms=50, max_reversals=1, hand="RIGHT",
             uppercut_gyro_dps=180, uppercut_turn_deg=12, uppercut_axis=0,
             uppercut_window_ms=120, uppercut_direction=0, uppercut_axis_share=0.70),
-    1: dict(label="JAB",   imu="IMU2", onset_g=0.45, rearm_g=0.06, rearm_samples=4,
-            cycle_window_ms=300, sustain_g=0.15, confirm_samples=4, confirm_ms=30,
+    1: dict(label="JAB",   imu="IMU2", onset_g=0.45, rearm_g=0.06, rearm_samples = 3,
+            cycle_window_ms=200, sustain_g=0.15, confirm_samples=4, confirm_ms=30,
             max_gap_ms=50, max_reversals=1, hand="LEFT",
             uppercut_gyro_dps=180, uppercut_turn_deg=12, uppercut_axis=0,
             uppercut_window_ms=120, uppercut_direction=0, uppercut_axis_share=0.70),
