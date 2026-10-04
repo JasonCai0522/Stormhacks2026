@@ -9,10 +9,11 @@ How a punch is counted
 A punch has two phases: the extension (out) and the retraction (back). Either one
 can be the fast part, so BOTH are treated as punch evidence:
 
-  * The first spike (dmag >= onset_g) from a hand fires a punch. That spike might be
-    the extension (fast punch) or the retraction (slow extension that never crossed
-    the threshold, followed by a fast pull-back).
-  * That spike opens a "cycle window" (cycle_window_ms). Any spike inside the window
+  * A short burst must contain a strong peak (dmag >= onset_g) and at least
+    confirm_samples consecutive samples above sustain_g, spanning confirm_ms.
+    One isolated spike or a small movement does not fire a punch. The burst can
+    come from either extension or retraction.
+  * Confirmation opens a "cycle window" (cycle_window_ms). Any spike inside the window
     is treated as the other half of the SAME punch and ignored. This is what stops a
     fast punch + fast retraction from counting twice.
   * After the window, the hand re-arms only once it has been quiet for
@@ -31,37 +32,64 @@ METER = False    # True = print any sample with dmag above METER_MIN_G, to help 
 METER_MIN_G = 0.05
 
 # ---- Tuning ----------------------------------------------------------------
-# onset_g         : dmag (g, change per sample) that counts as a punch spike
+# Values are acceleration CHANGE per sample in g, not absolute acceleration.
+# Defaults target the supplied sketch's SAMPLE_MS=10 (about 100 Hz).
+# onset_g         : minimum peak dmag in a confirmed burst
+# sustain_g       : minimum dmag for each consecutive sample in the burst
+# confirm_samples : minimum number of consecutive active samples
+# confirm_ms      : minimum duration of the burst (uses the ESP32 timestamps)
+# max_gap_ms      : discard pending confirmation / quiet streak across data gaps
 # rearm_g         : dmag must stay below this to re-arm after the window
 # rearm_samples   : ...for this many samples in a row
 # cycle_window_ms : after a punch fires, spikes within this time are the same punch
 #                   (its retraction). Too short -> retraction double-fires.
 #                   Too long -> a quick second punch from the same hand is missed.
 CONFIG = {
-    0: dict(label="CROSS", imu="IMU1", onset_g=0.15, rearm_g=0.06, rearm_samples=4,
-            cycle_window_ms=300),
-    1: dict(label="JAB",   imu="IMU2", onset_g=0.15, rearm_g=0.06, rearm_samples=4,
-            cycle_window_ms=300),
+    0: dict(label="CROSS", imu="IMU1", onset_g=0.50, rearm_g=0.06, rearm_samples=4,
+            cycle_window_ms=300, sustain_g=0.20, confirm_samples=3, confirm_ms=20,
+            max_gap_ms=50),
+    1: dict(label="JAB",   imu="IMU2", onset_g=0.50, rearm_g=0.06, rearm_samples=4,
+            cycle_window_ms=300, sustain_g=0.20, confirm_samples=3, confirm_ms=20,
+            max_gap_ms=50),
 }
 # -----------------------------------------------------------------------------
 
 
 class PunchDetector:
-    def __init__(self, label, imu, onset_g, rearm_g, rearm_samples, cycle_window_ms):
+    def __init__(self, label, imu, onset_g, rearm_g, rearm_samples, cycle_window_ms,
+                 sustain_g=0.20, confirm_samples=3, confirm_ms=20, max_gap_ms=50):
         self.label, self.imu = label, imu
         self.onset_g, self.rearm_g = onset_g, rearm_g
         self.rearm_samples, self.cycle_window_ms = rearm_samples, cycle_window_ms
-        self.armed = True
-        self.window_end_ms = 0
-        self.quiet = 0
+        self.sustain_g = sustain_g
+        self.confirm_samples, self.confirm_ms = confirm_samples, confirm_ms
+        self.max_gap_ms = max_gap_ms
+        self.reset()
 
     def reset(self):
         self.armed = True
         self.window_end_ms = 0
         self.quiet = 0
+        self.last_sample_ms = None
+        self.clear_burst()
+
+    def clear_burst(self):
+        self.burst_start_ms = None
+        self.burst_samples = 0
+        self.burst_peak = 0.0
 
     def update(self, t_ms, d):
-        """Returns the magnitude if a punch fired on this sample, else None."""
+        """Return the burst's peak magnitude on confirmation, otherwise None."""
+        if self.last_sample_ms is not None:
+            gap = t_ms - self.last_sample_ms
+            if gap == 0:
+                return None  # Duplicate packets are not confirmation evidence.
+            if gap < 0:
+                self.reset()
+            elif gap > self.max_gap_ms:
+                self.clear_burst()
+                self.quiet = 0
+        self.last_sample_ms = t_ms
         mag = math.sqrt(d[0] ** 2 + d[1] ** 2 + d[2] ** 2)
 
         # Inside the cycle window: this is the other half of the same punch. Ignore.
@@ -70,11 +98,22 @@ class PunchDetector:
             return None
 
         if self.armed:
-            if mag >= self.onset_g:
+            if mag < self.sustain_g:
+                self.clear_burst()
+                return None
+            if self.burst_start_ms is None:
+                self.burst_start_ms = t_ms
+            self.burst_samples += 1
+            self.burst_peak = max(self.burst_peak, mag)
+            if (self.burst_peak >= self.onset_g
+                    and self.burst_samples >= self.confirm_samples
+                    and t_ms - self.burst_start_ms >= self.confirm_ms):
+                peak = self.burst_peak
                 self.armed = False
                 self.window_end_ms = t_ms + self.cycle_window_ms
                 self.quiet = 0
-                return mag
+                self.clear_burst()
+                return peak
             return None
 
         # Window over, not yet re-armed: wait for a quiet stretch.
@@ -104,7 +143,7 @@ def handle_sample(t_ms, imu_ok, deltas):
         mag = det.update(t_ms, d)
         if mag is not None:
             x, y, z = d
-            print(f"{det.label:<5} ({det.imu})  dmag={mag:.2f} g  d=({x:+.2f}, {y:+.2f}, {z:+.2f})")
+            print(f"{det.label:<5} ({det.imu})  peak dmag={mag:.2f} g  current d=({x:+.2f}, {y:+.2f}, {z:+.2f})")
 
 
 # imu_client.on_notify looks up handle_sample at call time, so swapping it out here
