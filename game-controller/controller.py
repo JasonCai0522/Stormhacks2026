@@ -1,8 +1,9 @@
+"""Facing resolution and virtual Xbox output for run_controller.py."""
+
 from __future__ import annotations
 
 import json
 import re
-import time
 from collections.abc import Iterable, Set
 from typing import Any, Literal
 
@@ -10,7 +11,6 @@ import vgamepad as vg
 
 # ---- adjust these ----
 GAME_STATE_PATH: str = r"C:\Program Files (x86)\Steam\steamapps\common\Street Fighter 6\reframework\data\p1_character.json"
-COMMAND_PATH: str = "inputs.json"   # relative to where you run the script
 # ----------------------
 
 B = vg.XUSB_BUTTON
@@ -94,27 +94,3 @@ def apply(resolved: Set[str]) -> None:
         else:
             print("Unknown input:", name)
     pad.update()
-
-
-def main() -> None:
-    print("Controller running. Ctrl+C to stop.")
-    last: set[str] | None = None
-    try:
-        while True:
-            cmd = read_json(COMMAND_PATH)
-            held = cmd.get("held", []) if cmd else []
-            resolved = resolve(held)
-            if resolved != last:      # only talk to the driver on changes
-                apply(resolved)
-                last = resolved
-            time.sleep(1 / 60)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        pad.reset()
-        pad.update()
-        print("Released all inputs.")
-
-
-if __name__ == "__main__":
-    main()
