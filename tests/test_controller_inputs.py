@@ -15,6 +15,12 @@ bluetooth = load_module("test_esp32_bluetooth", ROOT / "microcontroller" / "blue
 
 class ControllerInputTests(unittest.TestCase):
     def test_main_without_bluetooth_sends_movement_and_releases_on_exit(self):
+        self.check_main_inputs(voice_enabled=False)
+
+    def test_main_voice_uses_neutral_special_then_restores_movement(self):
+        self.check_main_inputs(voice_enabled=True)
+
+    def check_main_inputs(self, voice_enabled):
         cv2 = Mock()
         frame = Mock(shape=(480, 640, 3))
         cv2.VideoCapture.return_value.read.return_value = (True, frame)
@@ -29,16 +35,33 @@ class ControllerInputTests(unittest.TestCase):
         pose_module.PoseDetector.return_value.__enter__.return_value = detector
         controller = Mock()
         controller.resolve.return_value = {"right"}
-        with patch("sys.argv", ["run_controller.py", "--no-bluetooth"]), \
+        voice = Mock()
+        if voice_enabled:
+            voice.held.side_effect = [{"special"}, {"special"}, set()]
+            cv2.waitKey.side_effect = [-1, -1, ord("q")]
+            controller.resolve.side_effect = [set(), {"special"}, {"right"}]
+        argv = ["run_controller.py", "--no-bluetooth"]
+        if not voice_enabled:
+            argv.append("--no-voice")
+        with patch("sys.argv", argv), \
                 patch("sys.path", list(run_controller.sys.path)), \
                 patch.dict("sys.modules", {"cv2": cv2, "pose_detector": pose_module, "serial": None}), \
                 patch.object(run_controller.Path, "is_file", return_value=True), \
                 patch.object(run_controller, "load_controller", return_value=controller), \
+                patch.object(run_controller, "start_voice_input", return_value=voice) as start_voice, \
                 patch.object(run_controller, "load_module") as load_transport:
             run_controller.main()
         load_transport.assert_not_called()
-        controller.resolve.assert_called_once_with({"forward"})
-        self.assertEqual(controller.apply.call_args_list, [call(set()), call({"right"}), call(set())])
+        if voice_enabled:
+            start_voice.assert_called_once()
+            self.assertEqual(controller.resolve.call_args_list,
+                             [call(set()), call({"special"}), call({"forward"})])
+            self.assertEqual(controller.apply.call_args_list,
+                             [call(set()), call({"special"}), call({"right"}), call(set())])
+        else:
+            start_voice.assert_not_called()
+            controller.resolve.assert_called_once_with({"forward"})
+            self.assertEqual(controller.apply.call_args_list, [call(set()), call({"right"}), call(set())])
         cv2.VideoCapture.return_value.release.assert_called_once()
 
     def test_repeated_messages_hold_until_silence(self):

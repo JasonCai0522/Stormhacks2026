@@ -18,6 +18,27 @@ incoming attack strings. That module currently connects through a serial COM
 port; transport changes belong there as the Bluetooth implementation develops.
 Do not run its standalone listener alongside the main program.
 
+Voice attacks are enabled automatically when `ELEVENLABS_API_KEY` or `API_KEY`
+is set in the environment or the repository-root `.env` file. Without a key,
+voice is skipped and the other inputs keep working. Only `Hadouken` is currently
+supported (`Hadoken` is accepted too). `VOICE_COMMAND_CONTROLS` in
+`speech-to-text/voicelines.py` maps it to the `special` input understood by
+`controller.py`, which presses Xbox Y with the default Modern layout.
+For Ryu/Ken, Hadouken requires neutral + Special. Voice temporarily overrides
+webcam directions and ESP32 attacks, releases all inputs for one frame, then
+presses Special for the rest of the `--attack-timeout` window (default 0.25 s).
+Normal inputs resume afterward. Select Modern controls and a character with
+this shortcut; voice does not change the character's airborne state.
+See the [Ryu Modern command guide](https://note.com/utontsuyu_room/n/n428a41694ecc?hl=en).
+Use `--no-voice` to disable voice explicitly.
+Microphone or transcription failures disable voice for that run.
+
+Voice uses the default microphone and sends non-silent three-second recordings
+to ElevenLabs Scribe v2 in a background thread. Commands take effect after the
+recording and API response; the microphone pauses while transcribing. The webcam
+loop continues throughout. Do not run `speech-to-text/voicelines.py` alongside
+the controller; that script can be used on its own to check voice recognition.
+
 From the repository root:
 
 ```bash
@@ -32,8 +53,8 @@ To run webcam movement and gamepad control before Bluetooth is set up:
 python run_controller.py --no-bluetooth
 ```
 
-This mode skips loading the Bluetooth module and opening its connection. Attack
-buttons remain released; facing resolution and movement work as usual.
+This mode skips loading the Bluetooth module and opening its connection. Voice
+attacks remain available when a key is configured. Add `--no-voice` for movement only.
 
 The virtual controller requires Windows and the ViGEmBus driver used by
 `vgamepad`. Configure SF6 with Modern controls. The existing controller's button

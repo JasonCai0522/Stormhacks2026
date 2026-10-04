@@ -1,4 +1,4 @@
-"""Combine webcam movement and ESP32 attacks using game-controller/controller.py."""
+"""Combine webcam movement, ESP32 attacks, and optional voice attacks."""
 
 import argparse
 import importlib.util
@@ -92,6 +92,17 @@ def movement_input(detector, pose, timestamp_ms, image_size):
     return set()
 
 
+def combine_voice_input(movement, attacks, voice_controls, previous_voice_controls):
+    """Give the Modern Hadouken shortcut neutral direction and its own press.
+
+    Release all inputs for one frame before pressing Special, including an
+    ESP32-held Special button. Other sources resume after the voice press.
+    """
+    if voice_controls:
+        return set(), set(voice_controls) if voice_controls == previous_voice_controls else set()
+    return movement, attacks
+
+
 def update_controller(controller, held, last):
     # Resolve every frame, including while a lean stays held during a side swap.
     resolved = controller.resolve(held)
@@ -142,6 +153,15 @@ def load_module(name, path):
     return module
 
 
+def start_voice_input(resources, timeout):
+    voice_module = load_module("voice_commands", ROOT / "speech-to-text" / "voicelines.py")
+    api_key = voice_module.get_api_key()
+    if not api_key:
+        print("Voice disabled: no ELEVENLABS_API_KEY or API_KEY in .env/environment.")
+        return None
+    return resources.enter_context(voice_module.VoiceCommands(api_key, timeout))
+
+
 # Default CV state output path mirrors p1_character.json in the same REFramework data folder.
 _DEFAULT_CV_STATE = (
     r"C:\Program Files (x86)\Steam\steamapps\common"
@@ -155,6 +175,8 @@ def main():
     parser.add_argument("--model", choices=("lite", "full", "heavy"), default="lite")
     parser.add_argument("--no-bluetooth", action="store_true",
                         help="Run webcam movement and gamepad control without microcontroller attacks")
+    parser.add_argument("--no-voice", action="store_true",
+                        help="Disable microphone voice attacks even when an API key is configured")
     parser.add_argument("--port", help="Override the port configured in microcontroller/bluetooth.py")
     parser.add_argument("--baud", type=int,
                         help="Override the baud rate configured in microcontroller/bluetooth.py")
@@ -194,13 +216,15 @@ def main():
                 reader = resources.enter_context(MicrocontrollerAttacks(connection, args.attack_timeout))
                 mode = f"ESP32 on {port}"
             else:
-                mode = "Bluetooth disabled; movement only"
+                mode = "Bluetooth disabled"
             camera = cv2.VideoCapture(args.camera)
             if not camera.isOpened():
                 raise RuntimeError(f"Could not open camera {args.camera}")
+            voice = start_voice_input(resources, args.attack_timeout) if not args.no_voice else None
             with PoseDetector(model_path) as detector:
                 start = time.monotonic()
                 last = set()
+                previous_voice_controls = set()
                 print(f"Controller running; {mode}. Press q, Escape, or Ctrl+C to stop.")
                 while True:
                     success, frame = camera.read()
@@ -212,6 +236,11 @@ def main():
                     movement = movement_input(detector, pose, timestamp_ms,
                                               (frame.shape[1], frame.shape[0]))
                     attacks = reader.held() if reader is not None else set()
+                    voice_controls = voice.held() if voice is not None else set()
+                    movement, attacks = combine_voice_input(
+                        movement, attacks, voice_controls, previous_voice_controls
+                    )
+                    previous_voice_controls = voice_controls
                     held = movement | attacks
                     last = update_controller(controller, held, last)
                     write_cv_state(args.cv_state_out, movement, attacks, pose)
