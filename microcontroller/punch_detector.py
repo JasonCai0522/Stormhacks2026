@@ -35,7 +35,7 @@ import asyncio
 import math
 from collections import deque
 
-import imu_client
+import IMU_client as imu_client
 
 VERBOSE = False  # True = also print every raw sample (imu_client's default output)
 METER = False    # True = print any sample with dmag above METER_MIN_G, to help tune onset_g
