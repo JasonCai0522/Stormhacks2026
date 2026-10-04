@@ -12,7 +12,7 @@ bleak.BleakClient = Mock()
 bleak.BleakScanner = Mock()
 spec = importlib.util.spec_from_file_location(
     "imu_client_under_test",
-    Path(__file__).resolve().parents[1] / "microcontroller" / "imu_client.py",
+    Path(__file__).resolve().parents[1] / "microcontroller" / "IMU_client.py",
 )
 imu = importlib.util.module_from_spec(spec)
 with patch.dict(sys.modules, {"bleak": bleak}):
@@ -87,7 +87,7 @@ class ImuPacketTests(unittest.TestCase):
             Path(__file__).resolve().parents[1] / "microcontroller" / "punch_detector.py",
         )
         detector = importlib.util.module_from_spec(detector_spec)
-        with patch.dict(sys.modules, {"imu_client": imu}):
+        with patch.dict(sys.modules, {"IMU_client": imu}):
             detector_spec.loader.exec_module(detector)
         imu.handle_sample = self.handler
         self.handler.side_effect = detector.handle_sample

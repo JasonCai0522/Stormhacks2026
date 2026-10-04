@@ -67,13 +67,13 @@ METER_MIN_G = 0.05
 #                   (its retraction). Too short -> retraction double-fires.
 #                   Too long -> a quick second punch from the same hand is missed.
 CONFIG = {
-    0: dict(label="CROSS", imu="IMU1", onset_g=0.45, rearm_g=0.06, rearm_samples=4,
-            cycle_window_ms=300, sustain_g=0.15, confirm_samples=4, confirm_ms=30,
+    0: dict(label="CROSS", imu="IMU1", onset_g=0.45, rearm_g=0.06, rearm_samples=3,
+            cycle_window_ms=200, sustain_g=0.15, confirm_samples=4, confirm_ms=30,
             max_gap_ms=50, max_reversals=1, hand="RIGHT",
             uppercut_gyro_dps=180, uppercut_turn_deg=12, uppercut_axis=0,
             uppercut_window_ms=120, uppercut_direction=0, uppercut_axis_share=0.70),
-    1: dict(label="JAB",   imu="IMU2", onset_g=0.45, rearm_g=0.06, rearm_samples=4,
-            cycle_window_ms=300, sustain_g=0.15, confirm_samples=4, confirm_ms=30,
+    1: dict(label="JAB",   imu="IMU2", onset_g=0.45, rearm_g=0.06, rearm_samples=3,
+            cycle_window_ms=200, sustain_g=0.15, confirm_samples=4, confirm_ms=30,
             max_gap_ms=50, max_reversals=1, hand="LEFT",
             uppercut_gyro_dps=180, uppercut_turn_deg=12, uppercut_axis=0,
             uppercut_window_ms=120, uppercut_direction=0, uppercut_axis_share=0.70),
@@ -218,6 +218,7 @@ class PunchDetector:
 
 detectors = {i: PunchDetector(**cfg) for i, cfg in CONFIG.items()}
 _original_handler = imu_client.handle_sample
+on_punch = None  # Optional callback receiving LEFT/RIGHT_STRAIGHT/UPPERCUT events.
 
 
 def handle_sample(t_ms, imu_ok, deltas, gyros=None):
@@ -240,6 +241,8 @@ def handle_sample(t_ms, imu_ok, deltas, gyros=None):
         if mag is not None:
             x, y, z = d
             event = f"{det.hand}_{det.last_kind}"
+            if on_punch is not None:
+                on_punch(event)
             punch_label = "UPPERCUT" if det.last_kind == "UPPERCUT" else det.label
             print(f"{event} {punch_label} ({det.imu})  peak dmag={mag:.2f} g  "
                   f"gyro_axis={det.uppercut_axis} gyro_peak={det.last_gyro_peak:.1f} deg/s "

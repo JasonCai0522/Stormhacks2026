@@ -14,7 +14,7 @@ spec = importlib.util.spec_from_file_location(
     Path(__file__).resolve().parents[1] / "microcontroller" / "punch_detector.py",
 )
 punch = importlib.util.module_from_spec(spec)
-with patch.dict(sys.modules, {"imu_client": client}):
+with patch.dict(sys.modules, {"IMU_client": client}):
     spec.loader.exec_module(punch)
 
 

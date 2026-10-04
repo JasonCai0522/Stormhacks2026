@@ -79,7 +79,7 @@ def on_notify(_sender, data: bytearray):
     handle_sample(t_ms, imu_ok, deltas)
 
 
-async def run():
+async def run(on_disconnect=None):
     while True:
         print(f"Scanning for '{DEVICE_NAME}'...")
         device = await BleakScanner.find_device_by_name(DEVICE_NAME, timeout=10)
@@ -97,6 +97,10 @@ async def run():
                 print("Disconnected.")
         except Exception as e:
             print(f"Connection error: {e}")
+        finally:
+            _pending.clear()
+            if on_disconnect is not None:
+                on_disconnect()
         await asyncio.sleep(1)
 
 

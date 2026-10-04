@@ -2,7 +2,7 @@
 
 ## Project layout
 
-- `run_controller.py`: main entry point combining all three inputs.
+- `run_controller.py`: main entry point combining webcam movement and BLE punches.
 - `computer-vision/`: pose detection, webcam tools, and downloaded models.
 - `game-controller/`: virtual Xbox controller, game-state reader, and SF6 REFramework integration.
 - `microcontroller/`: ESP32 connection tools.
@@ -13,17 +13,17 @@
 Run one program to combine webcam movement, ESP32 attacks, and the facing-state
 JSON used by `game-controller/controller.py`. The program imports that controller and
 uses its `resolve()` and `apply()` functions for facing and virtual Xbox output.
-The main program uses `BluetoothReceiver` in `microcontroller/bluetooth.py` for
-incoming attack strings. That module currently connects through a serial COM
-port; transport changes belong there as the Bluetooth implementation develops.
-Do not run its standalone listener alongside the main program.
+By default, the main program connects to `ESP32-IMU` over BLE using
+`microcontroller/IMU_client.py`, classifies its samples with `punch_detector.py`,
+and sends the resulting attacks through `ble_attacks.py`. Run only the main
+program while playing; the standalone punch debugger uses the same BLE device.
 
 From the repository root:
 
 ```bash
 python -m pip install -r requirements.txt
 python computer-vision/download_model.py
-python run_controller.py --port COM4 --baud 115200
+python run_controller.py
 ```
 
 To run webcam movement and gamepad control before Bluetooth is set up:
@@ -43,11 +43,30 @@ mappings and facing-state path are used directly. To change the JSON location:
 python run_controller.py --game-state "C:/path/to/reframework/data/p1_character.json"
 ```
 
-The ESP32 must send newline-terminated strings: `light`, `medium`, `heavy`, or
-`special`. Repeat the current attack while the gesture is active. Each valid
-message holds that attack and replaces the previous attack. The attack releases
-after 250 ms without another valid message; adjust this to your message interval
-with `--attack-timeout 0.5` (seconds). Unknown messages are ignored.
+Use the acceleration+gyro firmware in `microcontroller/microcontroller_code.cpp`.
+The gesture mapping is:
+
+| Gesture | Game input | Default Modern Xbox button |
+| --- | --- | --- |
+| Left straight | light | X |
+| Left uppercut | medium | A |
+| Right straight | heavy | B |
+| Right uppercut | special | Y |
+
+These game button names do not classify punch strength. Each detected gesture
+presses its button for 100 ms, then releases it. Adjust the press duration with
+`--attack-pulse 0.08` (seconds). Punches are queued with a released frame between
+them so repeated punches produce separate button presses. Old queued punches
+expire after 500 ms; a disconnect or 500 ms without complete samples clears
+attacks. BLE scanning/reconnection runs in the background while webcam movement
+continues. Punch debug measurements still print in the same console. Detection
+thresholds and uppercut axes remain in `punch_detector.py`'s `CONFIG`.
+
+The previous newline-based COM-port receiver is available with
+`python run_controller.py --transport serial --port COM4 --baud 115200`.
+Providing `--port` or `--baud` without a transport also selects serial mode.
+That mode expects `light`, `medium`, `heavy`, or `special` messages and uses
+`--attack-timeout` (default 250 ms) to release an attack after messages stop.
 
 Movement uses the existing priority: jump (up), crouch (down), forward lean
 (forward), backward lean (back), otherwise neutral. Forward/back are resolved by
@@ -55,12 +74,13 @@ Movement uses the existing priority: jump (up), crouch (down), forward lean
 sides. Movement and an attack can be held together; diagonal movement is deferred.
 Missing poses release movement. Keep the feet visible and start grounded for
 jump calibration. Press q, Escape, or Ctrl+C to stop and release all inputs.
-Camera/serial errors also exit and release inputs.
+Camera/reader errors also exit and release inputs.
 
 Run the input integration tests without hardware:
 
 ```bash
 python -m unittest discover -s tests -p test_controller_inputs.py
+python -m unittest discover -s tests -p test_ble_attacks.py
 ```
 
 ## BLE punch and uppercut debugging
@@ -82,8 +102,8 @@ python microcontroller/punch_detector.py
 Output distinguishes `LEFT_STRAIGHT`, `LEFT_UPPERCUT`, `RIGHT_STRAIGHT`,
 and `RIGHT_UPPERCUT`.
 It prints peak acceleration change, peak gyro speed in degrees/second, and
-estimated net turn in degrees. This standalone debugger does not send these
-events to `run_controller.py`.
+estimated net turn in degrees. The standalone debugger only prints events;
+`run_controller.py` uses the same classifier and receives its events directly.
 
 Tune each hand separately in `punch_detector.py`'s `CONFIG`.
 Uppercuts require a confirmed acceleration burst, a gyro peak of at least

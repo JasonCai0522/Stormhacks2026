@@ -155,6 +155,10 @@ def main():
     parser.add_argument("--model", choices=("lite", "full", "heavy"), default="lite")
     parser.add_argument("--no-bluetooth", action="store_true",
                         help="Run webcam movement and gamepad control without microcontroller attacks")
+    parser.add_argument("--transport", choices=("ble", "serial"),
+                        help="Attack transport (default: BLE; --port/--baud imply serial)")
+    parser.add_argument("--attack-pulse", type=float, default=0.10,
+                        help="Seconds to press each detected BLE punch (default: 0.10)")
     parser.add_argument("--port", help="Override the port configured in microcontroller/bluetooth.py")
     parser.add_argument("--baud", type=int,
                         help="Override the baud rate configured in microcontroller/bluetooth.py")
@@ -168,6 +172,11 @@ def main():
     args = parser.parse_args()
     if not math.isfinite(args.attack_timeout) or args.attack_timeout <= 0:
         parser.error("--attack-timeout must be a finite positive number")
+    if not math.isfinite(args.attack_pulse) or args.attack_pulse <= 0:
+        parser.error("--attack-pulse must be a finite positive number")
+    transport = args.transport or ("serial" if args.port is not None or args.baud is not None else "ble")
+    if transport == "ble" and (args.port is not None or args.baud is not None):
+        parser.error("--port and --baud apply to --transport serial")
     model_path = VISION_DIR / "models" / f"pose_landmarker_{args.model}.task"
     if not model_path.is_file():
         parser.error(f"Model not found: {model_path}. Run python computer-vision/download_model.py --model {args.model}")
@@ -186,7 +195,17 @@ def main():
         controller.apply(set())
         with ExitStack() as resources:
             reader = None
-            if not args.no_bluetooth:
+            if not args.no_bluetooth and transport == "ble":
+                sys.path.insert(0, str(ROOT / "microcontroller"))
+                try:
+                    ble = load_module("esp32_ble_attacks", ROOT / "microcontroller" / "ble_attacks.py")
+                except ModuleNotFoundError as exc:
+                    if exc.name == "bleak":
+                        raise RuntimeError("BLE requires bleak; run python -m pip install -r requirements.txt") from exc
+                    raise
+                reader = resources.enter_context(ble.BLEAttacks(args.attack_pulse))
+                mode = "ESP32-IMU over BLE"
+            elif not args.no_bluetooth:
                 bluetooth = load_module("esp32_bluetooth", ROOT / "microcontroller" / "bluetooth.py")
                 port = args.port if args.port is not None else bluetooth.PORT
                 baud = args.baud if args.baud is not None else bluetooth.BAUD

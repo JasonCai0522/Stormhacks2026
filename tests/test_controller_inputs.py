@@ -14,6 +14,40 @@ bluetooth = load_module("test_esp32_bluetooth", ROOT / "microcontroller" / "blue
 
 
 class ControllerInputTests(unittest.TestCase):
+    def test_main_uses_ble_by_default_and_combines_punch_with_movement(self):
+        cv2 = Mock()
+        frame = Mock(shape=(480, 640, 3))
+        cv2.VideoCapture.return_value.read.return_value = (True, frame)
+        cv2.waitKey.return_value = ord("q")
+        detector = Mock()
+        detector.process_frame.return_value.pose_landmarks = []
+        detector.detect_jumping.return_value = False
+        pose_module = Mock()
+        pose_module.PoseDetector = MagicMock()
+        pose_module.PoseDetector.return_value.__enter__.return_value = detector
+        reader = Mock()
+        reader.held.return_value = {"medium"}
+        ble = Mock()
+        ble.BLEAttacks = MagicMock()
+        ble.BLEAttacks.return_value.__enter__.return_value = reader
+        controller = Mock()
+        controller.resolve.side_effect = lambda held: held
+        with patch("sys.argv", ["run_controller.py", "--attack-pulse", "0.08"]), \
+                patch("sys.path", list(run_controller.sys.path)), \
+                patch.dict("sys.modules", {"cv2": cv2, "pose_detector": pose_module}), \
+                patch.object(run_controller.Path, "is_file", return_value=True), \
+                patch.object(run_controller, "load_controller", return_value=controller), \
+                patch.object(run_controller, "load_module", return_value=ble) as load_transport, \
+                patch.object(run_controller, "movement_input", return_value={"forward"}), \
+                patch.object(run_controller, "write_cv_state"):
+            run_controller.main()
+        load_transport.assert_called_once_with("esp32_ble_attacks", ROOT / "microcontroller" / "ble_attacks.py")
+        ble.BLEAttacks.assert_called_once_with(0.08)
+        self.assertEqual(controller.apply.call_args_list,
+                         [call(set()), call({"forward", "medium"}), call(set())])
+        ble.BLEAttacks.return_value.__exit__.assert_called_once()
+        cv2.VideoCapture.return_value.release.assert_called_once()
+
     def test_main_without_bluetooth_sends_movement_and_releases_on_exit(self):
         cv2 = Mock()
         frame = Mock(shape=(480, 640, 3))
