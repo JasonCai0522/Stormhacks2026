@@ -1,11 +1,17 @@
 import io
+import os
+from pathlib import Path
+from dotenv import load_dotenv
 import difflib
 import numpy as np
 import sounddevice as sd
 import soundfile as sf
 from elevenlabs.client import ElevenLabs
 
-API_KEY = "sk_21be7f292c9c6c627e1e47390d31584d1468a410b05024f0"  # Paste your key
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+API_KEY = os.getenv("API_KEY")
+if not API_KEY:
+    raise RuntimeError("Set API_KEY in the repository-root .env file or environment.")
 client = ElevenLabs(api_key=API_KEY)
 
 DURATION = 3
