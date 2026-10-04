@@ -39,11 +39,12 @@ def handle_sample(t_ms, imu_ok, deltas):
             line += f"IMU{n + 1}: dax={x:+.3f} day={y:+.3f} daz={z:+.3f} dmag={mags[n]:.3f}   "
         else:
             line += f"IMU{n + 1}: --no data--   "
-    print(line)
+    #print(line)
 
     for n in range(2):
         if imu_ok[n] and mags[n] > HIT_THRESHOLD_G:
-            print(f"  >>> HIT on IMU{n + 1} (dmag {mags[n]:.2f} g)")
+            #print(f"  >>> HIT on IMU{n + 1} (dmag {mags[n]:.2f} g)")
+            pass
 
 
 def on_notify(_sender, data: bytearray):
