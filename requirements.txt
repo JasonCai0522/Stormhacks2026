@@ -2,3 +2,7 @@
 pyserial>=3.5,<4
 vgamepad>=0.1.0,<1
 python-dotenv>=1,<2
+numpy
+sounddevice
+soundfile
+elevenlabs
