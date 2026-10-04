@@ -58,3 +58,13 @@ if needed. When processing video, pass timestamps in milliseconds. The detector
 advances repeated or decreasing timestamps automatically. Landmarks are
 normalized to the image dimensions; world landmarks are also available in
 `result`.
+
+The webcam example prints jumping, crouching, or leaning when detected. Jumping
+takes priority and uses movement across frames: keep the camera fixed, keep the
+feet in view, and start with the feet grounded for at least 200 ms. In your own
+loop, call `detector.detect_jumping(pose, timestamp_ms, image_size=(width, height))`
+every frame, passing `None` as the pose when no person is detected. Brief tracking
+loss is tolerated for up to 500 ms; use `detector.reset_jump_detection()` explicitly
+when changing people or cameras.
+Jump detection tracks one person and estimates airborne movement from visible
+feet and torso movement; it does not directly measure floor contact.

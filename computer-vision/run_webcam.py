@@ -45,12 +45,16 @@ def main() -> None:
                 if result.pose_landmarks:
                     pose = result.pose_landmarks[0]
                     image_size = (frame.shape[1], frame.shape[0])
-                    if detector.detect_crouching(pose, image_size=image_size):
+                    if detector.detect_jumping(pose, timestamp_ms, image_size=image_size):
+                        print("Jumping")
+                    elif detector.detect_crouching(pose, image_size=image_size):
                         print("Crouching")
                     elif detector.detect_leaning_forward(pose, image_size=image_size):
                         print("Leaning forward")
                     elif detector.detect_leaning_backward(pose, image_size=image_size):
                         print("Leaning backward")
+                else:
+                    detector.detect_jumping(None, timestamp_ms)
                 display = detector.draw_landmarks(frame, result)
                 cv2.imshow("MediaPipe Pose (q or Esc to quit)", display)
 
