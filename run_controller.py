@@ -2,6 +2,7 @@
 
 import argparse
 import importlib.util
+import json
 import math
 import sys
 import threading
@@ -99,6 +100,37 @@ def update_controller(controller, held, last):
     return resolved
 
 
+# Key MediaPipe landmark indices exported for the mini stick-figure.
+# Covers: nose, shoulders, elbows, wrists, hips, knees, ankles.
+_LANDMARK_INDICES = (0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28)
+
+
+def write_cv_state(path, movement, attacks, pose=None):
+    """Write current input state (and optional pose landmarks) for the Lua overlay.
+
+    ``path`` is a pathlib.Path or str. ``pose`` is a single MediaPipe pose
+    landmarks list (or None when no person is detected). Key joints are written
+    as {"index": [x, y]} with normalised 0-1 coordinates. Errors are silently
+    ignored so a missing path never crashes the main loop.
+    """
+    try:
+        state = {
+            "movement": next(iter(movement)) if movement else "neutral",
+            "attack": next(iter(attacks)) if attacks else "none",
+        }
+        if pose is not None:
+            lm_data = {}
+            for i in _LANDMARK_INDICES:
+                lm = pose[i]
+                if getattr(lm, "visibility", 0.0) >= 0.35:
+                    lm_data[str(i)] = [round(lm.x, 4), round(lm.y, 4)]
+            state["landmarks"] = lm_data
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(state, fh)
+    except Exception:
+        pass
+
+
 def load_controller(path):
     return load_module("sf6_controller", path)
 
@@ -108,6 +140,13 @@ def load_module(name, path):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+# Default CV state output path mirrors p1_character.json in the same REFramework data folder.
+_DEFAULT_CV_STATE = (
+    r"C:\Program Files (x86)\Steam\steamapps\common"
+    r"\Street Fighter 6\reframework\data\cv_state.json"
+)
 
 
 def main():
@@ -124,6 +163,8 @@ def main():
     parser.add_argument("--controller", type=Path, default=ROOT / "game-controller" / "controller.py")
     parser.add_argument("--game-state", type=Path,
                         help="Override controller.py's facing-state JSON path")
+    parser.add_argument("--cv-state-out", type=Path, default=_DEFAULT_CV_STATE,
+                        help="Path to write cv_state.json for the REFramework overlay (default: SF6 reframework/data folder)")
     args = parser.parse_args()
     if not math.isfinite(args.attack_timeout) or args.attack_timeout <= 0:
         parser.error("--attack-timeout must be a finite positive number")
@@ -170,8 +211,10 @@ def main():
                     pose = result.pose_landmarks[0] if result.pose_landmarks else None
                     movement = movement_input(detector, pose, timestamp_ms,
                                               (frame.shape[1], frame.shape[0]))
-                    held = movement | (reader.held() if reader is not None else set())
+                    attacks = reader.held() if reader is not None else set()
+                    held = movement | attacks
                     last = update_controller(controller, held, last)
+                    write_cv_state(args.cv_state_out, movement, attacks, pose)
                     display = detector.draw_landmarks(frame, result)
                     label = " + ".join(sorted(held)) or "neutral"
                     cv2.putText(display, label, (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
