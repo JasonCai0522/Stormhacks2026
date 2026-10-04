@@ -115,6 +115,95 @@ class PunchDetectorTests(unittest.TestCase):
                 punch.handle_sample(t, (True, False), [(0.3, 0, 0), (0, 0, 0)])
         output.assert_not_called()
 
+    def gyro_punch(self, gyro, peak=0.6):
+        # Rotation begins before the acceleration burst, as in a sweeping motion.
+        for t in range(0, 70, 10):
+            self.assertIsNone(self.detector.update(t, (0, 0, 0), gyro))
+        values = [self.detector.update(t, (g, 0, 0), gyro)
+                  for t, g in ((70, peak), (80, 0.2), (90, 0.2), (100, 0.2))]
+        self.assertEqual(values, [None] * 3 + [peak])
+
+    def test_sweeping_punch_is_hook_in_either_direction(self):
+        for rate in (250, -250):
+            with self.subTest(rate=rate):
+                self.detector.reset()
+                self.gyro_punch((0, 0, rate))
+                self.assertEqual(self.detector.last_kind, "HOOK")
+                self.assertAlmostEqual(self.detector.last_turn_deg, 25)
+
+    def test_low_rotation_punch_stays_straight(self):
+        self.gyro_punch((0, 0, 40))
+        self.assertEqual(self.detector.last_kind, "STRAIGHT")
+
+    def test_single_gyro_spike_does_not_make_a_hook(self):
+        for t, g in ((0, 0.6), (10, 0.2), (20, 0.2), (30, 0.2)):
+            self.detector.update(t, (g, 0, 0), (0, 0, 500 if t == 0 else 0))
+        self.assertEqual(self.detector.last_kind, "STRAIGHT")
+
+    def test_rotation_without_acceleration_burst_does_not_fire(self):
+        for t in range(0, 200, 10):
+            self.assertIsNone(self.detector.update(t, (0.1, 0, 0), (0, 0, 300)))
+
+    def test_alternating_rotation_cancels_hook_evidence(self):
+        for t in range(0, 110, 10):
+            rate = 300 if t % 20 == 0 else -300
+            g = 0 if t < 70 else (0.6 if t == 70 else 0.2)
+            self.detector.update(t, (g, 0, 0), (0, 0, rate))
+        self.assertEqual(self.detector.last_kind, "STRAIGHT")
+
+    def test_hook_axis_excludes_rotation_on_other_axes(self):
+        self.detector = punch.PunchDetector(**dict(punch.CONFIG[0], hook_axis=2))
+        self.gyro_punch((300, 0, 0))
+        self.assertEqual(self.detector.last_kind, "STRAIGHT")
+
+    def test_old_rotation_expires(self):
+        for t in range(0, 200, 10):
+            self.detector.update(t, (0, 0, 0), (0, 0, 300))
+        for t in range(200, 400, 10):
+            self.detector.update(t, (0, 0, 0), (0, 0, 0))
+        for t, g in ((400, 0.6), (410, 0.2), (420, 0.2), (430, 0.2)):
+            self.detector.update(t, (g, 0, 0), (0, 0, 0))
+        self.assertEqual(self.detector.last_kind, "STRAIGHT")
+
+    def test_legacy_packet_cannot_reuse_gyro_evidence(self):
+        for t in range(0, 100, 10):
+            self.detector.update(t, (0, 0, 0), (0, 0, 300))
+        for t, g in ((100, 0.6), (110, 0.2), (120, 0.2), (130, 0.2)):
+            self.detector.update(t, (g, 0, 0))
+        self.assertEqual(self.detector.last_kind, "STRAIGHT")
+
+    def test_labels_include_hand_type_and_strength(self):
+        for i, hand in ((0, "RIGHT"), (1, "LEFT")):
+            for peak, strength in ((0.6, "LIGHT"), (1.0, "HARD")):
+                with self.subTest(hand=hand, strength=strength):
+                    for det in punch.detectors.values():
+                        det.reset()
+                    with patch("builtins.print") as output:
+                        for t in range(0, 110, 10):
+                            deltas = [(0, 0, 0), (0, 0, 0)]
+                            gyros = [(0, 0, 0), (0, 0, 0)]
+                            gyros[i] = (0, 0, 250)
+                            if t >= 70:
+                                deltas[i] = (peak if t == 70 else 0.2, 0, 0)
+                            punch.handle_sample(t, (True, True), deltas, gyros)
+                    output.assert_called_once()
+                    self.assertTrue(output.call_args.args[0].startswith(f"{hand}_HOOK_{strength}"))
+                    self.assertIn("gyro_peak=250.0", output.call_args.args[0])
+
+    def test_straight_labels_preserve_light_and_hard(self):
+        for i, hand in ((0, "RIGHT"), (1, "LEFT")):
+            for peak, strength in ((0.6, "LIGHT"), (0.9, "HARD")):
+                with self.subTest(hand=hand, strength=strength):
+                    for det in punch.detectors.values():
+                        det.reset()
+                    with patch("builtins.print") as output:
+                        for t, g in ((0, peak), (10, 0.2), (20, 0.2), (30, 0.2)):
+                            deltas = [(0, 0, 0), (0, 0, 0)]
+                            deltas[i] = (g, 0, 0)
+                            punch.handle_sample(t, (True, True), deltas)
+                    output.assert_called_once()
+                    self.assertTrue(output.call_args.args[0].startswith(f"{hand}_STRAIGHT_{strength}"))
+
 
 if __name__ == "__main__":
     unittest.main()

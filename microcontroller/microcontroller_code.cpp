@@ -3,7 +3,7 @@
 
   Based on dual_mpu6050_two_buses_diff.ino. Same wiring and self-test, but
   instead of printing once per second it streams the CHANGE in acceleration
-  (sample-to-sample, in g) to a computer over BLE notifications at ~50 Hz.
+  (sample-to-sample, in g) and gyroscope readings at ~100 Hz.
 
   Wiring (unchanged):
     ESP32 3V3    -> VCC on both sensors
@@ -17,12 +17,15 @@
     Service     : 6e400001-b5a3-f393-e0a9-e50e24dcca9e
     Notify char : 6e400003-b5a3-f393-e0a9-e50e24dcca9e
 
-  Packet (17 bytes, little-endian, fits the default 20-byte BLE payload):
+  Two v2 packets per sample, one per sensor. Each is 17 bytes, little-endian,
+  and fits the default 20-byte BLE payload. Both have the same timestamp:
     uint32 t_ms        millis() when sampled
-    uint8  flags       bit0 = IMU1 ok, bit1 = IMU2 ok
-    int16  d[6]        IMU1 dax,day,daz, IMU2 dax,day,daz   (milli-g)
+    uint8  flags       bit7 = v2, bit2 = sensor index (0/1), bit0 = sensor ok
+    int16  d[3]        dax,day,daz (milli-g)
+    int16  gyro[3]     bias-corrected gx,gy,gz (32.8 LSB per degree/second)
 
   Magnitude is computed on the computer side from the three axes.
+  Keep sensors still at startup: self-test also estimates gyroscope bias.
 
   LED on GPIO 2:
     slow blink = both sensors working
@@ -41,9 +44,10 @@ const int SCL1_PIN = 22;
 const int SDA2_PIN = 25;
 const int SCL2_PIN = 26;
 
-const unsigned long SAMPLE_MS = 10;   // 20 ms = 50 samples per second
+const unsigned long SAMPLE_MS = 10;   // 100 samples per second
 
 const float ACCEL_SCALE = 16384.0;    // LSB per g (+/-2g)
+// GYRO_CONFIG=0x10: +/-1000 degrees/second, 32.8 LSB per degree/second.
 
 #define BLE_NAME      "ESP32-IMU"
 #define SERVICE_UUID  "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
@@ -54,18 +58,21 @@ struct Imu {
   uint8_t addr;
   const char *name;
   bool ok;
+  float gyroBias[3];
 };
 
 Imu imus[2] = {
-  {&Wire,  0x68, "IMU1", false},
-  {&Wire1, 0x68, "IMU2", false}
+  {&Wire,  0x68, "IMU1", false, {0, 0, 0}},
+  {&Wire1, 0x68, "IMU2", false, {0, 0, 0}}
 };
 
 struct __attribute__((packed)) Packet {
   uint32_t t_ms;
   uint8_t  flags;
-  int16_t  d[6];
+  int16_t  d[3];
+  int16_t  gyro[3];
 };
+static_assert(sizeof(Packet) == 17, "BLE packet must fit default payload");
 
 unsigned long lastBlink = 0, lastSample = 0, lastRetry = 0;
 bool ledState = false;
@@ -115,11 +122,17 @@ bool probe(Imu &m) {
   return m.bus->endTransmission() == 0;
 }
 
-bool wake(Imu &m) {
+bool writeRegister(Imu &m, uint8_t reg, uint8_t value) {
   m.bus->beginTransmission(m.addr);
-  m.bus->write(0x6B);                 // PWR_MGMT_1: clear sleep bit
-  m.bus->write(0x00);
+  m.bus->write(reg);
+  m.bus->write(value);
   return m.bus->endTransmission() == 0;
+}
+
+bool wake(Imu &m) {
+  return writeRegister(m, 0x6B, 0x00)  // PWR_MGMT_1: clear sleep bit
+      && writeRegister(m, 0x1C, 0x00)  // ACCEL_CONFIG: +/-2g
+      && writeRegister(m, 0x1B, 0x10); // GYRO_CONFIG: +/-1000 degrees/second
 }
 
 int whoAmI(Imu &m) {
@@ -169,6 +182,7 @@ bool selfTest(Imu &m) {
   Serial.println(id == 0x68 ? " (genuine MPU6050)" : " (unusual ID, may be a clone, usually still works)");
 
   float sumMag = 0;
+  float sumGyro[3] = {0, 0, 0};
   int good = 0;
   bool allZero = true;
   for (int i = 0; i < 20; i++) {
@@ -177,6 +191,7 @@ bool selfTest(Imu &m) {
       float ax = v[0] / ACCEL_SCALE, ay = v[1] / ACCEL_SCALE, az = v[2] / ACCEL_SCALE;
       sumMag += sqrt(ax * ax + ay * ay + az * az);
       good++;
+      for (int k = 0; k < 3; k++) sumGyro[k] += v[4 + k];
       if (v[0] || v[1] || v[2] || v[4] || v[5] || v[6]) allZero = false;
     }
     delay(10);
@@ -201,7 +216,8 @@ bool selfTest(Imu &m) {
     Serial.println("WARN: magnitude is off. Keep the board still, or the sensor may be faulty.");
   }
 
-  Serial.println("PASS");
+  for (int k = 0; k < 3; k++) m.gyroBias[k] = sumGyro[k] / good;
+  Serial.println("PASS (gyro bias calibrated; keep sensors still during startup)");
   return true;
 }
 
@@ -273,26 +289,29 @@ void loop() {
   if (now - lastSample < SAMPLE_MS) return;
   lastSample = now;
 
-  Packet pkt;
-  memset(&pkt, 0, sizeof(pkt));
-  pkt.t_ms = now;
-
   for (int i = 0; i < 2; i++) {
-    if (!imus[i].ok) continue;
+    Packet pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.t_ms = now;
+    pkt.flags = 0x80 | (i << 2);
     int16_t raw[7];
-    if (readRaw(imus[i], raw)) {
-      computeDiff(i, raw, &pkt.d[i * 3]);
-      pkt.flags |= (1 << i);
-    } else {
+    if (imus[i].ok && readRaw(imus[i], raw)) {
+      computeDiff(i, raw, pkt.d);
+      for (int k = 0; k < 3; k++) {
+        long corrected = lroundf(raw[4 + k] - imus[i].gyroBias[k]);
+        pkt.gyro[k] = (int16_t)constrain(corrected, -32768L, 32767L);
+      }
+      pkt.flags |= 1;
+    } else if (imus[i].ok) {
       imus[i].ok = false;
       hasPrev[i] = false;
       Serial.print(imus[i].name);
       Serial.println(" stopped responding");
     }
-  }
-
-  if (bleConnected) {
-    txChar->setValue((uint8_t *)&pkt, sizeof(pkt));
-    txChar->notify();
+    // Send failed sensors too, so the client can reset that hand's detector.
+    if (bleConnected) {
+      txChar->setValue((uint8_t *)&pkt, sizeof(pkt));
+      txChar->notify();
+    }
   }
 }

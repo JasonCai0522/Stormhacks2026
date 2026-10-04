@@ -6,7 +6,8 @@ Set EXPECTED_MS to the same value as SAMPLE_MS in the Arduino sketch, then run
     py rate_check.py
 
 Every few seconds it prints one line:
-  rate     packets/second actually received vs. what the sketch should send
+  rate     complete samples/second received vs. what the sketch should send
+           (v2 pairs two hand packets into one sample)
   esp gap  time between samples measured by the ESP32's own clock (avg / max).
            This is how fast the ESP32 loop + sensors really run.
   late     samples whose ESP32 gap was more than 1.5x EXPECTED_MS
@@ -33,7 +34,7 @@ _bad_imu = 0
 _late = 0
 
 
-def handle_sample(t_ms, imu_ok, deltas):
+def handle_sample(t_ms, imu_ok, deltas, gyros=None):
     global _last_t, _last_pc, _t0, _count, _esp_gaps, _pc_gaps, _bad_imu, _late
 
     now = time.perf_counter()
