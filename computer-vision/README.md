@@ -15,6 +15,20 @@ python -m pip install -r computer-vision/requirements.txt
 python computer-vision/download_model.py
 ```
 
+The downloader defaults to `lite`. Select another variant with `--model`:
+
+```bash
+python computer-vision/download_model.py --model full
+python computer-vision/download_model.py --model heavy
+```
+
+Each variant is saved separately in `computer-vision/models/`. Existing downloads
+are skipped. To use a downloaded variant in the webcam example:
+
+```bash
+python computer-vision/run_webcam.py --model full
+```
+
 If `pyenv activate` is unavailable in your shell, install the `pyenv-virtualenv`
 plugin or open a new shell after pyenv initialization. Running commands from the
 repository root automatically selects `stormhacks` when pyenv is initialized.
@@ -25,7 +39,8 @@ repository root automatically selects `stormhacks` when pyenv is initialized.
 python computer-vision/run_webcam.py
 ```
 
-Choose a different camera or model path with `--camera` and `--model`. Press
+Choose a different camera with `--camera` or a model variant (`lite`, `full`,
+or `heavy`) with `--model`. The default model is `lite`. Press
 `q` or Escape in the preview window to exit.
 
 ## Use in code

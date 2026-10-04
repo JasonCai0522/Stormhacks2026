@@ -1,25 +1,35 @@
-"""Download the MediaPipe Pose Landmarker Lite model bundle."""
+"""Download a MediaPipe Pose Landmarker model bundle (lite, full, or heavy)."""
 
+import argparse
 from pathlib import Path
 from urllib.request import urlretrieve
 
 
-MODEL_URL = (
-    "https://storage.googleapis.com/mediapipe-models/pose_landmarker/"
-    "pose_landmarker_lite/float16/latest/pose_landmarker_lite.task"
-)
-MODEL_PATH = Path(__file__).parent / "models" / "pose_landmarker_lite.task"
+MODELS_DIR = Path(__file__).parent / "models"
 
 
 def main() -> None:
-    MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
-    if MODEL_PATH.exists():
-        print(f"Model already exists: {MODEL_PATH}")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--model", choices=("lite", "full", "heavy"), default="lite",
+        help="Model variant to download (default: lite)",
+    )
+    args = parser.parse_args()
+
+    model_name = f"pose_landmarker_{args.model}"
+    model_url = (
+        "https://storage.googleapis.com/mediapipe-models/pose_landmarker/"
+        f"{model_name}/float16/latest/{model_name}.task"
+    )
+    model_path = MODELS_DIR / f"{model_name}.task"
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    if model_path.exists():
+        print(f"Model already exists: {model_path}")
         return
 
-    print("Downloading Pose Landmarker Lite model...")
-    urlretrieve(MODEL_URL, MODEL_PATH)
-    print(f"Saved model to {MODEL_PATH}")
+    print(f"Downloading Pose Landmarker {args.model.title()} model...")
+    urlretrieve(model_url, model_path)
+    print(f"Saved model to {model_path}")
 
 
 if __name__ == "__main__":
