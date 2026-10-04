@@ -245,6 +245,7 @@ re.on_frame(function()
             p1_side       = side,
             p1_health     = health,      -- current HP (nil before match starts)
             p1_health_old = health_old,  -- HP from previous frame
+	        p1_take_damage = (p1_health ~= p1_health_old),
         })
     end
 
@@ -264,6 +265,7 @@ re.on_draw_ui(function()
     imgui.text("P1: "        .. (n1 or "N/A"))
     imgui.text("Facing: "    .. facing .. "  Side: " .. side)
     imgui.text("P1 health: " .. tostring(health) .. "  (old " .. tostring(health_old) .. ")")
+    imgui.text("P1 take_damage: " .. tostring(health ~= health_old))
     imgui.separator()
     imgui.text("Movement: "  .. cv_movement)
     imgui.text("Attack:   "  .. cv_attack)
