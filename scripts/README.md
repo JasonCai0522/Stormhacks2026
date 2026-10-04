@@ -4,7 +4,7 @@ This folder contains the lua script to record character game state information a
 
 The scripts in this file need to be manually placed in the game directory on your machine.
 
-## Set up 
+## Setup 
 
 Find the Street Fighter 6 game directory on your computer and place the `dinput8.dll` file in your SF6 folder (should be on the same level as the `StreetFighter6.exe`)
 
