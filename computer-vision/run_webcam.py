@@ -9,21 +9,30 @@ import cv2
 from pose_detector import PoseDetector
 
 
-DEFAULT_MODEL = Path(__file__).parent / "models" / "pose_landmarker_lite.task"
+MODELS_DIR = Path(__file__).parent / "models"
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--camera", type=int, default=0, help="Webcam device index")
-    parser.add_argument("--model", type=Path, default=DEFAULT_MODEL, help="Pose .task model")
+    parser.add_argument(
+        "--model", choices=("lite", "full", "heavy"), default="lite",
+        help="Model variant to use (default: lite)",
+    )
     args = parser.parse_args()
+    model_path = MODELS_DIR / f"pose_landmarker_{args.model}.task"
+    if not model_path.is_file():
+        parser.error(
+            f"Model not found: {model_path}. "
+            f"Download it with: python {Path(__file__).with_name('download_model.py')} --model {args.model}"
+        )
 
     camera = cv2.VideoCapture(args.camera)
     if not camera.isOpened():
         raise RuntimeError(f"Could not open camera {args.camera}")
 
     try:
-        with PoseDetector(args.model) as detector:
+        with PoseDetector(model_path) as detector:
             start_time = time.monotonic()
             while True:
                 success, frame = camera.read()
