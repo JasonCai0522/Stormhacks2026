@@ -11,8 +11,8 @@ can be the fast part, so BOTH are treated as punch evidence:
 
   * A short burst must contain a strong peak (dmag >= onset_g) and at least
     confirm_samples consecutive samples above sustain_g, spanning confirm_ms.
-    The vector changes must also mostly reinforce each other, rather than cancel
-    as in back-and-forth vibration. These are heuristics: delta-only packets cannot
+    One reversal in acceleration change is allowed; repeated strong reversals
+    are rejected as likely vibration. These are heuristics: delta-only packets cannot
     reliably identify every tap versus punch. The burst can come from either
     extension or retraction.
   * Confirmation opens a "cycle window" (cycle_window_ms). Any spike inside the window
@@ -40,10 +40,10 @@ METER_MIN_G = 0.05
 # sustain_g       : minimum dmag for each consecutive sample in the burst
 # confirm_samples : minimum number of consecutive active samples
 # confirm_ms      : minimum duration of the burst (uses the ESP32 timestamps)
-# min_coherence   : |sum of delta vectors| / sum of magnitudes (0..1).
-#                   Higher rejects more vibration, but may miss punches that
-#                   change direction during confirmation. This measures changes
-#                   in acceleration, not the direction the hand is travelling.
+# max_reversals   : allowed strong reversals between consecutive delta vectors.
+#                   One allows acceleration then deceleration; repeated reversals
+#                   suggest vibration. A reversal means an angle greater than 120
+#                   degrees in acceleration CHANGE, not hand travel direction.
 # max_gap_ms      : discard pending confirmation / quiet streak across data gaps
 # rearm_g         : dmag must stay below this to re-arm after the window
 # rearm_samples   : ...for this many samples in a row
@@ -51,27 +51,27 @@ METER_MIN_G = 0.05
 #                   (its retraction). Too short -> retraction double-fires.
 #                   Too long -> a quick second punch from the same hand is missed.
 CONFIG = {
-    0: dict(label="CROSS", imu="IMU1", onset_g=0.50, rearm_g=0.06, rearm_samples=4,
-            cycle_window_ms=300, sustain_g=0.20, confirm_samples=5, confirm_ms=40,
-            max_gap_ms=50, min_coherence=0.60),
-    1: dict(label="JAB",   imu="IMU2", onset_g=0.50, rearm_g=0.06, rearm_samples=4,
-            cycle_window_ms=300, sustain_g=0.20, confirm_samples=5, confirm_ms=40,
-            max_gap_ms=50, min_coherence=0.60),
+    0: dict(label="CROSS", imu="IMU1", onset_g=0.40, rearm_g=0.06, rearm_samples=4,
+            cycle_window_ms=300, sustain_g=0.12, confirm_samples=4, confirm_ms=30,
+            max_gap_ms=50, max_reversals=1),
+    1: dict(label="JAB",   imu="IMU2", onset_g=0.40, rearm_g=0.06, rearm_samples=4,
+            cycle_window_ms=300, sustain_g=0.12, confirm_samples=4, confirm_ms=30,
+            max_gap_ms=50, max_reversals=1),
 }
 # -----------------------------------------------------------------------------
 
 
 class PunchDetector:
     def __init__(self, label, imu, onset_g, rearm_g, rearm_samples, cycle_window_ms,
-                 sustain_g=0.20, confirm_samples=5, confirm_ms=40, max_gap_ms=50,
-                 min_coherence=0.60):
+                 sustain_g=0.12, confirm_samples=4, confirm_ms=30, max_gap_ms=50,
+                 max_reversals=1):
         self.label, self.imu = label, imu
         self.onset_g, self.rearm_g = onset_g, rearm_g
         self.rearm_samples, self.cycle_window_ms = rearm_samples, cycle_window_ms
         self.sustain_g = sustain_g
         self.confirm_samples, self.confirm_ms = confirm_samples, confirm_ms
         self.max_gap_ms = max_gap_ms
-        self.min_coherence = min_coherence
+        self.max_reversals = max_reversals
         self.reset()
 
     def reset(self):
@@ -85,8 +85,9 @@ class PunchDetector:
         self.burst_start_ms = None
         self.burst_samples = 0
         self.burst_peak = 0.0
-        self.burst_vector = [0.0, 0.0, 0.0]
-        self.burst_total_mag = 0.0
+        self.previous_delta = None
+        self.previous_mag = 0.0
+        self.burst_reversals = 0
 
     def update(self, t_ms, d):
         """Return the burst's peak magnitude on confirmation, otherwise None."""
@@ -115,14 +116,16 @@ class PunchDetector:
                 self.burst_start_ms = t_ms
             self.burst_samples += 1
             self.burst_peak = max(self.burst_peak, mag)
-            self.burst_total_mag += mag
-            for axis in range(3):
-                self.burst_vector[axis] += d[axis]
-            coherence = math.sqrt(sum(v * v for v in self.burst_vector)) / self.burst_total_mag
+            if self.previous_delta is not None:
+                dot = sum(a * b for a, b in zip(self.previous_delta, d))
+                if dot < -0.5 * self.previous_mag * mag:
+                    self.burst_reversals += 1
+            self.previous_delta = tuple(d)
+            self.previous_mag = mag
             if (self.burst_peak >= self.onset_g
                     and self.burst_samples >= self.confirm_samples
                     and t_ms - self.burst_start_ms >= self.confirm_ms
-                    and coherence >= self.min_coherence):
+                    and self.burst_reversals <= self.max_reversals):
                 peak = self.burst_peak
                 self.armed = False
                 self.window_end_ms = t_ms + self.cycle_window_ms

@@ -40,7 +40,7 @@ class PunchDetectorTests(unittest.TestCase):
     def test_burst_fires_once_and_returns_peak(self):
         self.assertEqual(self.replay([(0, 0.25), (10, 0.7), (20, 0.3),
                                      (30, 0.3), (40, 0.3)]),
-                         [None] * 4 + [0.7])
+                         [None] * 3 + [0.7, None])
         self.assertTrue(all(value is None for value in self.replay(
             [(t, 0.8) for t in range(50, 340, 10)])))
 
@@ -49,7 +49,7 @@ class PunchDetectorTests(unittest.TestCase):
         self.replay([(t, 0) for t in range(50, 380, 10)])
         self.assertEqual(self.replay([(380, 0.6), (390, 0.3), (400, 0.25),
                                      (410, 0.3), (420, 0.3)]),
-                         [None] * 4 + [0.6])
+                         [None] * 3 + [0.6, None])
 
     def test_packet_gap_preserves_retraction_cooldown(self):
         self.replay([(0, 0.6), (10, 0.3), (20, 0.25), (30, 0.3), (40, 0.3)])
@@ -64,7 +64,7 @@ class PunchDetectorTests(unittest.TestCase):
 
     def test_duplicate_packet_does_not_confirm(self):
         self.assertEqual(self.replay([(0, 0.6), (0, 0.6), (10, 0.3),
-                                     (20, 0.3), (40, 0.3)]), [None] * 5)
+                                     (30, 0.3)]), [None] * 4)
 
     def test_short_tap_burst_does_not_fire(self):
         self.assertEqual(self.replay([(0, 1.2), (10, 0.8), (20, 0.5),
@@ -77,7 +77,15 @@ class PunchDetectorTests(unittest.TestCase):
     def test_negative_direction_punch_can_fire(self):
         self.assertEqual(self.replay([(0, -0.6), (10, -0.3), (20, -0.25),
                                      (30, -0.3), (40, -0.3)]),
-                         [None] * 4 + [0.6])
+                         [None] * 3 + [0.6, None])
+
+    def test_light_short_punch_can_fire(self):
+        self.assertEqual(self.replay([(0, 0.45), (10, 0.15), (20, 0.13),
+                                     (30, 0.14)]), [None] * 3 + [0.45])
+
+    def test_punch_acceleration_then_deceleration_can_fire(self):
+        self.assertEqual(self.replay([(0, 0.45), (10, 0.15), (20, -0.3),
+                                     (30, -0.3)]), [None] * 3 + [0.45])
 
     def test_gap_or_clock_restart_discards_old_peak(self):
         for next_time in (100, 0):
