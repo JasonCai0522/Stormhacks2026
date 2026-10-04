@@ -1,9 +1,10 @@
-# lua and python scripts to read game input/output 
+# Lua and Python Scripts to Read Game Input/Output 
 
 This folder contains the lua script to record character game state information and python script to read it for the rest of the program. 
 
-## Set up 
 The scripts in this file need to be manually placed in the game directory on your machine.
+
+## Set up 
 
 Find the Street Fighter 6 game directory on your computer and place the `dinput8.dll` file in your SF6 folder (should be on the same level as the `StreetFighter6.exe`)
 
